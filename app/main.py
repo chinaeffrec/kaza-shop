@@ -2,6 +2,9 @@ from fastapi import FastAPI
 from sqlalchemy import text
 
 from app.db.engine import engine
+from app.db.base import Base
+from app.db.engine import engine
+from app.models import product
 
 app = FastAPI()
 @app.get("/health")
@@ -17,3 +20,10 @@ async def db_test():
             return {"db": "ok", "result": value}
     except Exception as e:
         return {"db": "error", "detail": str(e)}
+
+@app.get("/create-tables")
+async def create_tables():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    return {"status": "tables created"}
