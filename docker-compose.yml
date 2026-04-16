@@ -10,6 +10,16 @@ services:
     depends_on:
       - db
 
+  bot:
+    build: .
+    container_name: kaza_shop_bot
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      - db
+    command: python -m app.bot.bot
+
   db:
     image: postgres:15
     environment:

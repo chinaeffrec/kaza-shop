@@ -8,6 +8,7 @@ from app.db.base import Base
 # Product:
 # - id
 # - name
+# - category
 # - price
 # - characteristics
 # - description
@@ -19,9 +20,11 @@ class Product(Base):
     __tablename__ = "products"
 
 #id, primary_key
-    i: Mapped[int] = mapped_column(primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
 #product name
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+#category
+    category: Mapped[str] = mapped_column(String(255), nullable=False)
 #price of product
     price: Mapped[int] = mapped_column(nullable=False)
 #description of product

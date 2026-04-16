@@ -5,6 +5,7 @@ from app.db.engine import engine
 from app.db.base import Base
 from app.db.engine import engine
 from app.models import product
+from app.api.routes.products import router as products_router
 
 app = FastAPI()
 @app.get("/health")
@@ -27,3 +28,5 @@ async def create_tables():
         await conn.run_sync(Base.metadata.create_all)
 
     return {"status": "tables created"}
+
+app.include_router(products_router)

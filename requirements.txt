@@ -2,4 +2,6 @@ fastapi
 uvicorn[standard]
 sqlalchemy>=2.0
 asyncpg
+aiogram==3.*
+httpx
 
