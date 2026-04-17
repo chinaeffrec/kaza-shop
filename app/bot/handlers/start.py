@@ -1,5 +1,5 @@
-from aiogram import Router, F
-from aiogram.types import Message
+from aiogram import Router
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 
 from app.bot.services.products_api import fetch_products
@@ -14,14 +14,23 @@ async def start_handler(message: Message):
         await message.answer("Products not found")
         return
 
-    text = "Catalog:\n\n"
-    for product in products[:10]:
-        text += (
-            f"ID: {product['id']}\n"
-            f"Name: {product['name']}\n"
-            f"Price: {product['price']}\n"
-            f"---\n"
+    for product in products:
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Подробнее",
+                        callback_data=f"product_{product['id']}",
+                    )
+                ]
+            ]
+        )
+
+        text = (
+            f"{product['name']}\n"
+            f"Цена: {product['price']} ₽\n"
+            f"Категория: {product['category']}\n"
         )
     await message.answer(
-        text
+        text, reply_markup=keyboard
     )

@@ -1,11 +1,14 @@
 from fastapi import FastAPI
 from sqlalchemy import text
 
+import app.db.init_models
+
 from app.db.engine import engine
 from app.db.base import Base
 from app.db.engine import engine
-from app.models import product
+from app.models import products
 from app.api.routes.products import router as products_router
+from app.api.routes.cart import router as cart_router
 
 app = FastAPI()
 @app.get("/health")
@@ -30,3 +33,4 @@ async def create_tables():
     return {"status": "tables created"}
 
 app.include_router(products_router)
+app.include_router(cart_router)
