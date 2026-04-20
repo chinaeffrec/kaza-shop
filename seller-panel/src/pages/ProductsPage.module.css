@@ -1,0 +1,36 @@
+.toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.title { font-size: 22px; font-weight: 600; }
+.count { font-size: 14px; font-weight: 400; color: #888; margin-left: 8px; }
+.filters { margin-bottom: 16px; }
+.search { width: 300px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
+.msg { color: #888; margin-top: 40px; text-align: center; }
+
+.table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.table th { background: #f8f8f8; text-align: left; padding: 10px 14px; font-weight: 500; color: #555; border-bottom: 1px solid #eee; }
+.table td { padding: 10px 14px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+.table tr:last-child td { border-bottom: none; }
+
+.thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; }
+.noPhoto { color: #bbb; font-size: 12px; }
+.active { background: #e8f5e9; color: #2e7d32; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+.inactive { background: #fce4e4; color: #c62828; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+
+.actions { display: flex; gap: 6px; }
+.btnAdd  { background: #6c63ff; color: #fff; padding: 8px 18px; border-radius: 8px; font-size: 14px; }
+.btnAdd:hover { background: #574fd6; }
+.btnEdit { background: #e8f0fe; border-radius: 6px; padding: 6px 10px; }
+.btnDel  { background: #fce4e4; border-radius: 6px; padding: 6px 10px; }
+
+/* Modal */
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modalBox { background: #fff; border-radius: 14px; padding: 28px; width: 480px; max-height: 90vh; overflow-y: auto; }
+.modalTitle { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+.label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #555; margin-bottom: 14px; }
+.input { padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; resize: vertical; }
+.input:focus { outline: none; border-color: #6c63ff; }
+.fileHint { font-size: 12px; color: #888; margin-top: 2px; }
+.checkLabel { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 20px; cursor: pointer; }
+.modalFooter { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+.btnCancel { background: #f0f0f0; color: #555; padding: 8px 18px; border-radius: 8px; }
+.btnSave   { background: #6c63ff; color: #fff; padding: 8px 20px; border-radius: 8px; }
+.btnSave:disabled { opacity: .6; cursor: not-allowed; }

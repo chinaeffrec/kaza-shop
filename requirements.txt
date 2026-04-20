@@ -4,4 +4,7 @@ sqlalchemy>=2.0
 asyncpg
 aiogram==3.*
 httpx
-
+pandas
+openpyxl
+python-multipart
+aiofiles

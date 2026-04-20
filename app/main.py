@@ -1,36 +1,62 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+from pathlib import Path
 
+import app.models
 import app.db.init_models
 
 from app.db.engine import engine
 from app.db.base import Base
-from app.db.engine import engine
-from app.models import products
+
 from app.api.routes.products import router as products_router
 from app.api.routes.cart import router as cart_router
+from app.api.routes.imports import router as import_router
+from app.api.routes.catalog import router as catalog_router
+from app.api.routes.orders import router as orders_router
 
-app = FastAPI()
+app = FastAPI(title="Kaza Shop API", version="0.2.0")
+
+
+@app.on_event("startup")
+async def startup():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    print("[app] Tables created / verified")
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://seller:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+BASE_DIR = Path(__file__).resolve().parent
+MEDIA_DIR = BASE_DIR / "media"
+
+app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
 
 @app.get("/db-test")
 async def db_test():
     try:
         async with engine.connect() as conn:
             result = await conn.execute(text("SELECT 1"))
-            value = result.scalar()
-            return {"db": "ok", "result": value}
+            return {"db": "ok", "result": result.scalar()}
     except Exception as e:
         return {"db": "error", "detail": str(e)}
 
-@app.get("/create-tables")
-async def create_tables():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    return {"status": "tables created"}
 
 app.include_router(products_router)
 app.include_router(cart_router)
+app.include_router(import_router)
+app.include_router(catalog_router)
+app.include_router(orders_router)
