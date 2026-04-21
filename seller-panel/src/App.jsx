@@ -16,36 +16,48 @@ const NAV = [
 ]
 
 export default function App() {
-  const [page, setPage]       = useState('products')
-  const [shopName, setShopName] = useState('Kaza Shop')
-  const [logoUrl, setLogoUrl]   = useState(null)
-  const [statsState, setStatsState] = useState({ dateFrom:'', dateTo:'', stats:[], products:{} })
+  const [page, setPage]             = useState('products')
+  const [shopName, setShopName]     = useState('Kaza Shop')
+  const [statsState, setStatsState] = useState({ dateFrom:'', dateTo:'', stats:[], products:{}, sort:'ordered' })
 
   useEffect(() => {
-    api.getSettings().then(s => {
-      setShopName(s.shop_name || 'Kaza Shop')
-      setLogoUrl(s.logo_url ? `${api.BASE}${s.logo_url}` : null)
+    api.getSettings().then(cfg => {
+      setShopName(cfg.shop_name || 'Kaza Shop')
     }).catch(() => {})
-    return () => clearInterval(t)
   }, [])
 
   function onSettingsSaved(cfg) {
     setShopName(cfg.shop_name || 'Kaza Shop')
-    setLogoUrl(cfg.logo_url ? api.BASE + cfg.logo_url : null)
   }
 
   return (
     <div className={s.layout}>
       <aside className={s.sidebar}>
         <div className={s.logo}>
-          {logoUrl && <img src={logoUrl} className={s.logoImg} alt="" />}
-          <span className={s.logoText} style={{cursor:'pointer'}} onClick={()=>setPage('products')}>{shopName}</span>
+          <span
+            className={s.logoText}
+            style={{ cursor: 'pointer' }}
+            onClick={() => setPage('products')}
+          >
+            {shopName}
+          </span>
         </div>
+        <nav>
+          {NAV.map(n => (
+            <button
+              key={n.id}
+              className={`${s.navBtn} ${page === n.id ? s.active : ''}`}
+              onClick={() => setPage(n.id)}
+            >
+              {n.label}
+            </button>
+          ))}
+        </nav>
       </aside>
       <main className={s.main}>
         {page === 'products' && <ProductsPage />}
         {page === 'orders'   && <OrdersPage />}
-        {page === 'stats' && <StatsPage saved={statsState} onSave={setStatsState} />}
+        {page === 'stats'    && <StatsPage saved={statsState} onSave={setStatsState} />}
         {page === 'import'   && <ImportPage />}
         {page === 'settings' && <SettingsPage onSaved={onSettingsSaved} />}
       </main>
