@@ -1,5 +1,6 @@
 import httpx
 from aiogram.types import InputMediaPhoto, FSInputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.bot.services.catalog_cache import catalog_cache
 from app.bot.keyboards.catalog import (
@@ -61,36 +62,10 @@ class RenderEngine:
             product = catalog_cache.get_product(screen.product_id)
             if not product:
                 return await message.edit_text("Товар не найден")
-
-            lines = [f"📦 <b>{product.name}</b>", f"💰 <b>{product.price} ₽</b>"]
-            if product.description:
-                lines.append(f"\n{product.description}")
-            if product.characteristics:
-                lines.append(f"\n📋 <i>{product.characteristics}</i>")
-            text = "\n".join(lines)
-
-            kb = product_kb(product.id)
-
-            # Если есть сохранённый Telegram file_id — используем его
-            if product.image:
-                try:
-                    return await message.edit_media(
-                        media=InputMediaPhoto(
-                            media=product.image,
-                            caption=text,
-                            parse_mode="HTML",
-                        ),
-                        reply_markup=kb,
-                    )
-                except Exception:
-                    pass  # file_id устарел — покажем текст
-
-            # Нет фото — текстовый режим
-            return await message.edit_text(
-                text,
-                reply_markup=kb,
-                parse_mode="HTML",
-            )
+            sub = catalog_cache.get_subcategory_by_id(product.subcategory_id)
+            products = sub.products if sub else [product]
+            idx = next((i for i, p in enumerate(products) if p.id == product.id), 0)
+            return await _render_product_card(message, product, idx, len(products))
 
         # ─────────────────────────────
         # CART
@@ -118,6 +93,51 @@ class RenderEngine:
                 parse_mode="HTML",
             )
 
+async def _render_product_card(message, product, idx: int, total: int):
+    sub = catalog_cache.get_subcategory_by_id(product.subcategory_id)
+    products = sub.products if sub else [product]
+
+    lines = [f"📦 <b>{product.name}</b>"]
+    if getattr(product, 'discount_price', None):
+        lines.append(f"💰 <s>{product.price} ₽</s> → <b>{product.discount_price} ₽</b>")
+    else:
+        lines.append(f"💰 <b>{product.price} ₽</b>")
+    if product.description:
+        lines.append(f"\n{product.description}")
+    if product.characteristics:
+        lines.append(f"\n📋 <i>{product.characteristics}</i>")
+    text = "\n".join(lines)
+
+    # Навигационный ряд: ← 2/5 →
+    nav_row = []
+    if idx > 0:
+        prev = products[idx - 1]
+        nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"open_product_{prev.id}"))
+    nav_row.append(InlineKeyboardButton(text=f"{idx+1}/{total}", callback_data="noop"))
+    if idx < total - 1:
+        nxt = products[idx + 1]
+        nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"open_product_{nxt.id}"))
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        nav_row,
+        [
+            InlineKeyboardButton(text="➖", callback_data=f"cart_dec_{product.id}"),
+            InlineKeyboardButton(text="🛒 В корзину", callback_data=f"cart_add_{product.id}"),
+            InlineKeyboardButton(text="➕", callback_data=f"cart_inc_{product.id}"),
+        ],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back")],
+    ])
+
+    if product.image:
+        try:
+            return await message.edit_media(
+                media=InputMediaPhoto(media=product.image, caption=text, parse_mode="HTML"),
+                reply_markup=kb,
+            )
+        except Exception:
+            pass
+
+    return await message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
 # singleton
 render_engine = RenderEngine()

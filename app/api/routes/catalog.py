@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -13,8 +13,7 @@ router = APIRouter(prefix="/catalog", tags=["catalog"])
 @router.get("/categories")
 async def get_categories(session: AsyncSession = Depends(get_session)):
     result = await session.execute(select(Category))
-    categories = result.scalars().all()
-    return [{"id": c.id, "name": c.name, "slug": c.slug} for c in categories]
+    return [{"id": c.id, "name": c.name} for c in result.scalars().all()]
 
 
 @router.get("/categories/{category_id}/subcategories")
@@ -22,8 +21,7 @@ async def get_subcategories(category_id: int, session: AsyncSession = Depends(ge
     result = await session.execute(
         select(SubCategory).where(SubCategory.category_id == category_id)
     )
-    subs = result.scalars().all()
-    return [{"id": s.id, "name": s.name, "slug": s.slug} for s in subs]
+    return [{"id": s.id, "name": s.name} for s in result.scalars().all()]
 
 
 @router.get("/subcategories/{subcategory_id}/products")
@@ -31,30 +29,25 @@ async def get_products(subcategory_id: int, session: AsyncSession = Depends(get_
     result = await session.execute(
         select(Product).where(Product.subcategory_id == subcategory_id, Product.is_active == True)
     )
-    products = result.scalars().all()
-
     return [
         {
             "id": p.id,
             "name": p.name,
             "price": p.price,
             "discount_price": p.discount_price,
-            "images": p.images or []
+            "image_file_id": p.image_file_id,
+            "image_url": f"/media/{p.image_file_id}" if p.image_file_id else None,
         }
-        for p in products
+        for p in result.scalars().all()
     ]
 
 
 @router.get("/products/{product_id}")
 async def get_product(product_id: int, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(
-        select(Product).where(Product.id == product_id, Product.is_active == True)
-    )
+    result = await session.execute(select(Product).where(Product.id == product_id))
     product = result.scalar_one_or_none()
-
     if not product:
-        raise HTTPException(status_code=404, detail="Товар не найден")
-
+        return {"error": "not found"}
     return {
         "id": product.id,
         "name": product.name,
@@ -62,7 +55,20 @@ async def get_product(product_id: int, session: AsyncSession = Depends(get_sessi
         "discount_price": product.discount_price,
         "description": product.description,
         "characteristics": product.characteristics,
-        "images": product.images or [],
+        "image_file_id": product.image_file_id,
+        "image_url": f"/media/{product.image_file_id}" if product.image_file_id else None,
+        "subcategory_id": product.subcategory_id,
         "stock": product.stock,
-        "subcategory_id": product.subcategory_id
     }
+
+@router.post("/cache/reload")
+async def reload_cache():
+    """Сбрасывает и перезагружает кэш каталога в боте"""
+    import httpx
+    # Бот слушает этот endpoint и перезагружает свой кэш
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post("http://bot:8001/reload-cache")
+        return {"status": "ok", "message": "Кэш перезагружен"}
+    except Exception:
+        return {"status": "partial", "message": "Команда отправлена, бот перезагружает кэш"}

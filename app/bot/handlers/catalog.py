@@ -73,3 +73,7 @@ async def menu_back(callback: CallbackQuery):
 
     await render_engine.render(screen, callback.message)
     await callback.answer()
+
+@router.callback_query(F.data == "noop")
+async def noop(callback: CallbackQuery):
+    await callback.answer()

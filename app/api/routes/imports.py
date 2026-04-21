@@ -1,9 +1,8 @@
+from io import BytesIO
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import pandas as pd
-import os
-from pathlib import Path
 
 from app.db.session import get_session
 from app.models.category import Category
@@ -12,73 +11,123 @@ from app.models.product import Product
 
 router = APIRouter(prefix="/import", tags=["import"])
 
-
-async def get_or_create_category(session: AsyncSession, name: str):
-    result = await session.execute(select(Category).where(Category.name == name))
-    category = result.scalar_one_or_none()
-    if category:
-        return category
-
-    category = Category(name=name, slug=name.lower().replace(" ", "-"))
-    session.add(category)
-    await session.flush()
-    return category
+# Ожидаемые колонки xlsx:
+# category, subcategory, name, price, discount_price, description, characteristics, is_active
 
 
-async def get_or_create_subcategory(session: AsyncSession, category_id: int, name: str):
-    result = await session.execute(
-        select(SubCategory).where(
-            SubCategory.name == name,
-            SubCategory.category_id == category_id
-        )
+async def _get_or_create_category(session: AsyncSession, name: str) -> Category:
+    name = name.strip()
+    res = await session.execute(select(Category).where(Category.name == name))
+    cat = res.scalar_one_or_none()
+    if not cat:
+        cat = Category(name=name)
+        session.add(cat)
+        await session.flush()
+    return cat
+
+
+async def _get_or_create_subcategory(session: AsyncSession, category_id: int, name: str) -> SubCategory:
+    name = name.strip()
+    res = await session.execute(
+        select(SubCategory).where(SubCategory.name == name, SubCategory.category_id == category_id)
     )
-    sub = result.scalar_one_or_none()
-    if sub:
-        return sub
-
-    sub = SubCategory(
-        name=name,
-        slug=name.lower().replace(" ", "-"),
-        category_id=category_id
-    )
-    session.add(sub)
-    await session.flush()
+    sub = res.scalar_one_or_none()
+    if not sub:
+        sub = SubCategory(name=name, category_id=category_id)
+        session.add(sub)
+        await session.flush()
     return sub
 
 
 @router.post("/products")
-async def import_products(
-    file: UploadFile = File(...),
-    session: AsyncSession = Depends(get_session)
-):
-    if not file.filename.endswith('.xlsx'):
-        raise HTTPException(status_code=400, detail="Файл должен быть .xlsx")
+async def import_products(file: UploadFile = File(...), session: AsyncSession = Depends(get_session)):
+    if not file.filename or not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(400, "Only .xlsx or .xls files are allowed")
 
-    df = pd.read_excel(file.file, engine="openpyxl")
+    try:
+        content = await file.read()
+        df = pd.read_excel(BytesIO(content))
+    except Exception as e:
+        raise HTTPException(400, f"Error reading Excel file: {e}")
 
-    created = 0
-    for _, row in df.iterrows():
+    # Проверяем обязательные колонки
+    required = {"category", "subcategory", "name", "price"}
+    missing = required - set(df.columns)
+    if missing:
+        raise HTTPException(400, f"Missing columns: {missing}")
+
+    created = updated = 0
+    errors = []
+
+    for idx, row in df.iterrows():
         try:
-            category = await get_or_create_category(session, str(row["category"]))
-            subcategory = await get_or_create_subcategory(
-                session, category.id, str(row["subcategory"])
-            )
+            name = str(row["name"]).strip()
+            if not name or name == "nan":
+                continue
 
-            product = Product(
-                subcategory_id=subcategory.id,
-                name=str(row["name"]),
-                slug=str(row["name"]).lower().replace(" ", "-"),
-                price=int(row["price"]),
-                description=str(row.get("description")) if pd.notna(row.get("description")) else None,
-                characteristics=None,  # можно расширить позже
-                images=None,
-                stock=int(row.get("stock", 0)),
-                is_active=bool(row.get("is_active", True))
+            category = await _get_or_create_category(session, str(row["category"]))
+            subcategory = await _get_or_create_subcategory(session, category.id, str(row["subcategory"]))
+
+            price = int(float(row["price"]))
+            discount_price = None
+            if "discount_price" in df.columns and not pd.isna(row.get("discount_price")):
+                try:
+                    discount_price = int(float(row["discount_price"]))
+                except Exception:
+                    pass
+
+            description = None
+            if "description" in df.columns and not pd.isna(row.get("description")):
+                description = str(row["description"]).strip() or None
+
+            characteristics = None
+            if "characteristics" in df.columns and not pd.isna(row.get("characteristics")):
+                characteristics = str(row["characteristics"]).strip() or None
+
+            is_active = True
+            if "is_active" in df.columns and not pd.isna(row.get("is_active")):
+                val = row["is_active"]
+                if isinstance(val, bool):
+                    is_active = val
+                elif str(val).strip().lower() in ("false", "0", "нет", "no"):
+                    is_active = False
+
+            # Ищем по имени + подкатегория
+            res = await session.execute(
+                select(Product).where(Product.name == name, Product.subcategory_id == subcategory.id)
             )
-            session.add(product)
-            created += 1
+            existing = res.scalar_one_or_none()
+
+            if existing:
+                existing.price = price
+                existing.discount_price = discount_price
+                existing.description = description
+                existing.characteristics = characteristics
+                existing.is_active = is_active
+                updated += 1
+            else:
+                session.add(Product(
+                    subcategory_id=subcategory.id,
+                    name=name,
+                    price=price,
+                    discount_price=discount_price,
+                    description=description,
+                    characteristics=characteristics,
+                    is_active=is_active,
+                ))
+                created += 1
+
+            await session.commit()
+
         except Exception as e:
-            print(f"Ошибка при импорте строки: {e}")
+            await session.rollback()
+            errors.append(f"Row {idx} ({row.get('name', '?')}): {e}")
 
-    await session.commit()
-    return {"status": "ok", "created": created, "message": f"Создано {created} товаров"}
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=3) as client:
+            await client.post("http://bot:8001/reload-cache")
+    except Exception:
+        pass
+
+    return {"status": "ok", "created": created, "updated": updated, "errors": errors}

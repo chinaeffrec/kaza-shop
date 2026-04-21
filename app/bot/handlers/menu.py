@@ -119,28 +119,42 @@ async def open_order_status(callback: CallbackQuery):
 
 @router.callback_query(F.data == "menu_question")
 async def open_question(callback: CallbackQuery):
+    import httpx
+    contact = "@support"  # fallback
+    try:
+        async with httpx.AsyncClient(timeout=2) as client:
+            r = await client.get("http://app:8000/settings/")
+            if r.status_code == 200:
+                contact = r.json().get("seller_contact") or contact
+    except Exception:
+        pass
+
     await callback.message.edit_text(
-        "💬 <b>Связь с продавцом</b>\n\n"
-        "Напишите ваш вопрос следующим сообщением — мы передадим его продавцу.",
+        f"💬 <b>Написать нам</b>\n\nСвяжитесь с нами напрямую:\n{contact}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Отмена", callback_data="menu_back")]
+            [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu_back")]
         ]),
         parse_mode="HTML"
     )
-    from app.bot.states.contact import ContactState
-    from aiogram.fsm.context import FSMContext
-    # состояние устанавливается в contact handler
     await callback.answer()
 
 
 @router.callback_query(F.data == "menu_back")
 async def menu_back(callback: CallbackQuery):
+    import httpx
     from app.bot.keyboards.menu import main_menu
     navigation.reset(callback.from_user.id)
-    await callback.message.edit_text(
-        "👋 Добро пожаловать!\n\nВыберите действие:",
-        reply_markup=main_menu()
-    )
+
+    welcome_text = "👋 Добро пожаловать!\n\nВыберите действие:"
+    try:
+        async with httpx.AsyncClient(timeout=2) as client:
+            r = await client.get("http://app:8000/settings/")
+            if r.status_code == 200:
+                welcome_text = r.json().get("welcome_message") or welcome_text
+    except Exception:
+        pass
+
+    await callback.message.edit_text(welcome_text, reply_markup=main_menu())
     await callback.answer()
 
 

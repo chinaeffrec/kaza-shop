@@ -1,43 +1,10 @@
-.layout {
-  display: flex;
-  min-height: 100vh;
-}
-
-.sidebar {
-  width: 200px;
-  background: #1e1e2e;
-  color: #cdd6f4;
-  display: flex;
-  flex-direction: column;
-  padding: 0;
-  flex-shrink: 0;
-}
-
-.logo {
-  font-size: 18px;
-  font-weight: 600;
-  padding: 20px 18px 16px;
-  border-bottom: 1px solid #313244;
-  color: #cba6f7;
-}
-
-.navBtn {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 12px 18px;
-  background: transparent;
-  color: #cdd6f4;
-  font-size: 14px;
-  border-radius: 0;
-  transition: background 0.15s;
-}
-
+.layout { display: flex; min-height: 100vh; }
+.sidebar { background: #1e1e2e; color: #cdd6f4; display: flex; flex-direction: column; flex-shrink: 0; min-width: 180px; width: max-content; }
+.logo { display: flex; align-items: center; gap: 10px; padding: 18px 16px 14px; border-bottom: 1px solid #313244; min-height: 56px; }
+.logoImg { width: 28px; height: 28px; object-fit: contain; border-radius: 4px; flex-shrink: 0; }
+.logoText { font-size: 16px; font-weight: 600; color: #cba6f7; white-space: nowrap; }
+.navBtn { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; text-align: left; padding: 11px 16px; background: transparent; color: #cdd6f4; font-size: 14px; white-space: nowrap; transition: background .15s; border: none; cursor: pointer; }
 .navBtn:hover { background: #313244; }
 .navBtn.active { background: #313244; color: #cba6f7; font-weight: 500; }
-
-.main {
-  flex: 1;
-  padding: 28px 32px;
-  overflow-y: auto;
-}
+.badge { background: #f38ba8; color: #1e1e2e; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 10px; }
+.main { flex: 1; padding: 28px 32px; overflow-y: auto; min-width: 0; }
