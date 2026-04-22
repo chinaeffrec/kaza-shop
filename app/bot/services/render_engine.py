@@ -5,14 +5,33 @@ from app.bot.services.catalog_cache import catalog_cache
 from app.bot.keyboards.catalog import categories_kb, subcategories_kb
 
 BASE_URL = "http://app:8000"
-# Публичный URL медиа — используется для отправки фото через URL
 MEDIA_BASE = "http://app:8000/media"
 
 
-def _fmt_price(price: int | float) -> str:
-    if isinstance(price, float) and price != int(price):
-        return f"{price:,.2f} ₽".replace(",", " ")
-    return f"{int(price):,} ₽".replace(",", " ")
+def _fmt_price(price) -> str:
+    """
+    Форматирует цену:
+    1000    → 1 000 ₽
+    112000  → 112 000 ₽
+    55.99   → 55.99 ₽  (если дробная часть не ноль)
+    """
+    if price is None:
+        return "—"
+    try:
+        price = float(price)
+    except (TypeError, ValueError):
+        return str(price)
+
+    # Если дробная часть ненулевая — показываем копейки
+    if price != int(price):
+        # Форматируем с двумя знаками после запятой, разделитель тысяч — пробел
+        whole = int(price)
+        frac = round(price - whole, 2)
+        frac_str = f"{frac:.2f}"[1:]  # .99
+        whole_str = f"{whole:,}".replace(",", " ")
+        return f"{whole_str}{frac_str} ₽"
+    else:
+        return f"{int(price):,}".replace(",", " ") + " ₽"
 
 
 async def _render_product_card(message, product, idx: int, total: int):
@@ -32,7 +51,6 @@ async def _render_product_card(message, product, idx: int, total: int):
         lines.append(f"\n📋 <i>{product.characteristics}</i>")
     text = "\n".join(lines)
 
-    # Навигация ← N/M →
     nav_row = []
     if idx > 0:
         nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"open_product_{products[idx-1].id}"))
@@ -50,8 +68,6 @@ async def _render_product_card(message, product, idx: int, total: int):
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="back")],
     ])
 
-    # Фото: image — это имя файла (image_file_id из БД)
-    # Отправляем через URL, не через Telegram file_id
     if product.image:
         image_url = f"{MEDIA_BASE}/{product.image}"
         try:
@@ -61,8 +77,6 @@ async def _render_product_card(message, product, idx: int, total: int):
             )
         except Exception as e:
             print(f"[render] Image send failed ({product.image}): {e}")
-            # Fallback: текстовый режим
-            pass
 
     return await message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
@@ -101,7 +115,6 @@ class RenderEngine:
                     ]),
                     parse_mode="HTML",
                 )
-            # Открываем первый товар с навигацией
             return await _render_product_card(message, sub.products[0], 0, len(sub.products))
 
         if screen.type == "product":
