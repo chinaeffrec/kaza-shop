@@ -12,10 +12,13 @@ async def add_to_cart(callback: CallbackQuery):
     user_id = callback.from_user.id
 
     async with httpx.AsyncClient() as client:
-        await client.post(f"{BASE_URL}/api/cart/", json={
+        resp = await client.post(f"{BASE_URL}/cart/", json={
             "user_id": user_id,
             "product_id": product_id,
             "quantity": 1
         })
 
-    await callback.answer("✅ Добавлено в корзину")
+    if resp.status_code == 200:
+        await callback.answer("✅ Добавлено в корзину")
+    else:
+        await callback.answer("Ошибка добавления в корзину", show_alert=True)

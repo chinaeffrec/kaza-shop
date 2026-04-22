@@ -27,7 +27,10 @@ async def get_subcategories(category_id: int, session: AsyncSession = Depends(ge
 @router.get("/subcategories/{subcategory_id}/products")
 async def get_products(subcategory_id: int, session: AsyncSession = Depends(get_session)):
     result = await session.execute(
-        select(Product).where(Product.subcategory_id == subcategory_id, Product.is_active == True)
+        select(Product).where(
+            Product.subcategory_id == subcategory_id,
+            Product.is_active == True
+        )
     )
     return [
         {
@@ -35,8 +38,11 @@ async def get_products(subcategory_id: int, session: AsyncSession = Depends(get_
             "name": p.name,
             "price": p.price,
             "discount_price": p.discount_price,
+            "description": p.description,
+            "characteristics": p.characteristics,
             "image_file_id": p.image_file_id,
             "image_url": f"/media/{p.image_file_id}" if p.image_file_id else None,
+            "stock": p.stock,
         }
         for p in result.scalars().all()
     ]
@@ -61,14 +67,14 @@ async def get_product(product_id: int, session: AsyncSession = Depends(get_sessi
         "stock": product.stock,
     }
 
+
 @router.post("/cache/reload")
 async def reload_cache():
-    """Сбрасывает и перезагружает кэш каталога в боте"""
-    import httpx
-    # Бот слушает этот endpoint и перезагружает свой кэш
+    """Сбрасывает кэш каталога в боте"""
     try:
+        import httpx
         async with httpx.AsyncClient(timeout=5) as client:
             await client.post("http://bot:8001/reload-cache")
-        return {"status": "ok", "message": "Кэш перезагружен"}
-    except Exception:
-        return {"status": "partial", "message": "Команда отправлена, бот перезагружает кэш"}
+        return {"status": "ok", "message": "Кэш каталога перезагружен"}
+    except Exception as e:
+        return {"status": "partial", "message": f"Бот перезагружает кэш: {e}"}

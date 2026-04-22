@@ -26,7 +26,8 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
-      - ./app/media:/app/app/media
+      # ВАЖНО: монтируем media напрямую в /app/media (без двойного пути)
+      - media_data:/app/media
     env_file: .env
     depends_on:
       db:
@@ -45,6 +46,9 @@ services:
     restart: always
     env_file: .env
     command: python -m app.bot.bot
+    volumes:
+      - .:/app
+      - media_data:/app/media
     depends_on:
       app:
         condition: service_healthy
@@ -61,7 +65,6 @@ services:
       - "5173:5173"
     environment:
       - VITE_API_URL=http://localhost:8000
-    # Монтируем весь seller-panel, node_modules берём из образа (не перезаписываем)
     volumes:
       - ./seller-panel:/app
       - seller_node_modules:/app/node_modules
@@ -72,3 +75,4 @@ services:
 volumes:
   postgres_data:
   seller_node_modules:
+  media_data:

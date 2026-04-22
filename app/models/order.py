@@ -1,10 +1,10 @@
+from __future__ import annotations
 from datetime import datetime
 from sqlalchemy import ForeignKey, BigInteger, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 
-# new | confirmed | assembled | shipped | delivered | cancelled | returned
 ORDER_STATUSES = {
     "new":       "🆕 Новый",
     "confirmed": "✅ Подтверждён",
@@ -24,6 +24,7 @@ class Order(Base):
     total: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(32), default="new")
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    delivery_address: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         default=datetime.utcnow, onupdate=datetime.utcnow

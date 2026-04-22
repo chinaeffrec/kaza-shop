@@ -10,12 +10,13 @@ from typing import Optional
 
 from app.db.session import get_session
 from app.models.product import Product
-from app.api.schemas.product import ProductCreate, ProductUpdate
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
-MEDIA_DIR = Path(__file__).resolve().parents[3] / "media"
+# Путь к медиа: /app/media (совпадает с volume в docker-compose)
+MEDIA_DIR = Path("/app/media")
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
 
 async def _reload_bot_cache():
     try:
@@ -24,6 +25,7 @@ async def _reload_bot_cache():
             await client.post("http://bot:8001/reload-cache")
     except Exception:
         pass
+
 
 class ProductCreate(BaseModel):
     subcategory_id: int
@@ -47,9 +49,6 @@ class ProductUpdate(BaseModel):
     subcategory_id: Optional[int] = None
 
 
-
-
-
 @router.post("/", response_model=dict)
 async def create_product(data: ProductCreate, session: AsyncSession = Depends(get_session)):
     product = Product(**data.dict())
@@ -58,7 +57,6 @@ async def create_product(data: ProductCreate, session: AsyncSession = Depends(ge
     await session.refresh(product)
     await _reload_bot_cache()
     return _product_dict(product)
-
 
 
 @router.get("/", response_model=list[dict])
@@ -86,6 +84,11 @@ async def update_product(product_id: int, data: ProductUpdate, session: AsyncSes
 @router.delete("/{product_id}")
 async def delete_product(product_id: int, session: AsyncSession = Depends(get_session)):
     product = await _get_or_404(product_id, session)
+    # Удаляем файл фото если есть
+    if product.image_file_id:
+        img_path = MEDIA_DIR / product.image_file_id
+        if img_path.exists():
+            img_path.unlink()
     await session.delete(product)
     await session.commit()
     await _reload_bot_cache()
@@ -93,25 +96,34 @@ async def delete_product(product_id: int, session: AsyncSession = Depends(get_se
 
 
 @router.post("/{product_id}/photo")
-async def upload_photo(product_id: int, file: UploadFile = File(...), session: AsyncSession = Depends(get_session)):
+async def upload_photo(
+    product_id: int,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session)
+):
     if file.content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(400, f"Unsupported type: {file.content_type}")
+        raise HTTPException(400, f"Unsupported type: {file.content_type}. Use JPEG, PNG or WebP.")
+
     product = await _get_or_404(product_id, session)
 
+    # Удаляем старое фото
     if product.image_file_id:
-        old = MEDIA_DIR / product.image_file_id
-        if old.exists():
-            old.unlink()
+        old_path = MEDIA_DIR / product.image_file_id
+        if old_path.exists():
+            old_path.unlink()
 
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "jpg"
     filename = f"product_{product_id}_{uuid.uuid4().hex[:8]}.{ext}"
+    dest = MEDIA_DIR / filename
+
     MEDIA_DIR.mkdir(parents=True, exist_ok=True)
     content = await file.read()
-    async with aiofiles.open(MEDIA_DIR / filename, "wb") as out:
+    async with aiofiles.open(dest, "wb") as out:
         await out.write(content)
 
     product.image_file_id = filename
     await session.commit()
+    await _reload_bot_cache()
     return {"status": "ok", "filename": filename, "url": f"/media/{filename}"}
 
 

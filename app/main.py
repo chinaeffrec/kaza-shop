@@ -17,8 +17,9 @@ from app.api.routes.catalog import router as catalog_router
 from app.api.routes.orders import router as orders_router
 from app.api.routes.settings import router as settings_router, faq_router
 from app.api.routes.stats import router as stats_router
+from app.api.routes.auth import router as auth_router
 
-app = FastAPI(title="Kaza Shop API", version="0.3.0")
+app = FastAPI(title="Kaza Shop API", version="0.4.0")
 
 
 @app.on_event("startup")
@@ -30,15 +31,15 @@ async def startup():
 
 app.add_middleware(
     CORSMiddleware,
- #   allow_origins=["http://localhost:5173", "http://localhost:3000", "http://seller:5173"],
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-BASE_DIR = Path(__file__).resolve().parent
-MEDIA_DIR = BASE_DIR / "media"
+# Медиа лежат в /app/media (volume)
+MEDIA_DIR = Path("/app/media")
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
 
@@ -57,6 +58,7 @@ async def db_test():
         return {"db": "error", "detail": str(e)}
 
 
+app.include_router(auth_router)
 app.include_router(products_router)
 app.include_router(cart_router)
 app.include_router(import_router)

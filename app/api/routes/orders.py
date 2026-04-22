@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -6,8 +7,27 @@ from app.models.order import Order, OrderItem, ORDER_STATUSES
 from app.models.cart import Cart
 from app.models.product import Product
 from app.models.product_stats import ProductStats
+from app.models.user import User
 
 router = APIRouter(prefix="/orders", tags=["orders"])
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_TG_ID = os.getenv("ADMIN_TG_ID")  # Telegram ID администратора для уведомлений
+
+
+async def _send_telegram(chat_id: int | str, text: str):
+    """Отправляет сообщение через Telegram Bot API"""
+    if not BOT_TOKEN or not chat_id:
+        return
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+            )
+    except Exception as e:
+        print(f"[orders] Telegram send error: {e}")
 
 
 async def _inc_ordered(product_id: int, qty: int, session: AsyncSession):
@@ -21,37 +41,10 @@ async def _inc_ordered(product_id: int, qty: int, session: AsyncSession):
     s.ordered += qty
 
 
-@router.post("/")
-async def create_order(data: dict, session: AsyncSession = Depends(get_session)):
-    user_id = data["user_id"]
-    result = await session.execute(
-        select(Cart, Product).join(Product, Cart.product_id == Product.id)
-        .where(Cart.user_id == user_id)
-    )
-    rows = result.all()
-    if not rows:
-        raise HTTPException(status_code=400, detail="Cart is empty")
-
-    total = sum(p.price * c.quantity for c, p in rows)
-    order = Order(user_id=user_id, total=total, status="new")
-    session.add(order)
-    await session.flush()
-
-    for cart, product in rows:
-        session.add(OrderItem(
-            order_id=order.id, product_id=product.id,
-            name=product.name, price=product.price, quantity=cart.quantity,
-        ))
-        await _inc_ordered(product.id, cart.quantity, session)
-        await session.delete(cart)
-
-    await session.commit()
-    await session.refresh(order)
-    return {
-        "id": order.id, "user_id": order.user_id,
-        "total": order.total, "status": order.status,
-        "created_at": order.created_at.isoformat(),
-    }
+# ВАЖНО: /statuses и /user/{user_id} ДОЛЖНЫ быть ДО /{order_id}
+@router.get("/statuses")
+async def get_statuses():
+    return [{"value": k, "label": v} for k, v in ORDER_STATUSES.items()]
 
 
 @router.get("/user/{user_id}")
@@ -62,18 +55,94 @@ async def get_user_orders(user_id: int, session: AsyncSession = Depends(get_sess
     return [_order_dict(o) for o in result.scalars().all()]
 
 
+@router.post("/")
+async def create_order(data: dict, session: AsyncSession = Depends(get_session)):
+    user_id = data["user_id"]
+    comment = data.get("comment", "")
+    delivery_address = data.get("delivery_address", "")
+
+    result = await session.execute(
+        select(Cart, Product).join(Product, Cart.product_id == Product.id)
+        .where(Cart.user_id == user_id)
+    )
+    rows = result.all()
+    if not rows:
+        raise HTTPException(status_code=400, detail="Cart is empty")
+
+    total = sum(p.price * c.quantity for c, p in rows)
+    order = Order(
+        user_id=user_id,
+        total=total,
+        status="new",
+        comment=comment,
+        delivery_address=delivery_address,
+    )
+    session.add(order)
+    await session.flush()
+
+    items_text = []
+    for cart, product in rows:
+        session.add(OrderItem(
+            order_id=order.id, product_id=product.id,
+            name=product.name, price=product.price, quantity=cart.quantity,
+        ))
+        await _inc_ordered(product.id, cart.quantity, session)
+        await session.delete(cart)
+        items_text.append(f"• {product.name} × {cart.quantity} = {product.price * cart.quantity} ₽")
+
+    await session.commit()
+    await session.refresh(order)
+
+    # Получаем данные пользователя для уведомления
+    user_res = await session.execute(select(User).where(User.id == user_id))
+    user = user_res.scalar_one_or_none()
+    user_name = ""
+    user_contact = ""
+    if user:
+        user_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or f"ID:{user_id}"
+        user_contact = f"@{user.username}" if user.username else f"tg://user?id={user_id}"
+
+    # Уведомление администратору
+    admin_text = (
+        f"🆕 <b>Новый заказ #{order.id}</b>\n\n"
+        f"👤 Покупатель: {user_name}\n"
+        f"📞 Контакт: {user_contact}\n\n"
+        f"🛒 Товары:\n" + "\n".join(items_text) + "\n\n"
+        f"💰 <b>Итого: {total} ₽</b>\n"
+        + (f"🏠 Адрес: {delivery_address}\n" if delivery_address else "")
+        + (f"💬 Комментарий: {comment}" if comment else "")
+    )
+    await _send_telegram(ADMIN_TG_ID, admin_text)
+
+    return {
+        "id": order.id, "user_id": order.user_id,
+        "total": order.total, "status": order.status,
+        "created_at": order.created_at.isoformat(),
+    }
+
+
 @router.get("/")
 async def list_orders(status: str | None = None, session: AsyncSession = Depends(get_session)):
     query = select(Order).order_by(Order.created_at.desc())
     if status:
         query = query.where(Order.status == status)
     result = await session.execute(query)
-    return [_order_dict(o) for o in result.scalars().all()]
+    orders = result.scalars().all()
 
-
-@router.get("/statuses")
-async def get_statuses():
-    return [{"value": k, "label": v} for k, v in ORDER_STATUSES.items()]
+    # Обогащаем данными пользователей
+    result_list = []
+    for o in orders:
+        d = _order_dict(o)
+        user_res = await session.execute(select(User).where(User.id == o.user_id))
+        user = user_res.scalar_one_or_none()
+        if user:
+            d["user_name"] = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or f"ID:{o.user_id}"
+            d["user_contact"] = f"@{user.username}" if user.username else None
+        else:
+            d["user_name"] = f"ID:{o.user_id}"
+            d["user_contact"] = None
+        result_list.append(d)
+    return result_list
 
 
 @router.get("/{order_id}")
@@ -86,12 +155,20 @@ async def get_order(order_id: int, session: AsyncSession = Depends(get_session))
         select(OrderItem).where(OrderItem.order_id == order_id)
     )
     items = items_result.scalars().all()
-    return {
-        **_order_dict(order),
-        "items": [{"product_id": i.product_id, "name": i.name,
-                   "price": i.price, "quantity": i.quantity, "sum": i.price * i.quantity}
-                  for i in items],
-    }
+
+    d = _order_dict(order)
+    d["items"] = [
+        {"product_id": i.product_id, "name": i.name,
+         "price": i.price, "quantity": i.quantity, "sum": i.price * i.quantity}
+        for i in items
+    ]
+
+    user_res = await session.execute(select(User).where(User.id == order.user_id))
+    user = user_res.scalar_one_or_none()
+    if user:
+        d["user_name"] = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or f"ID:{order.user_id}"
+        d["user_contact"] = f"@{user.username}" if user.username else None
+    return d
 
 
 @router.patch("/{order_id}/status")
@@ -103,10 +180,25 @@ async def update_order_status(order_id: int, data: dict, session: AsyncSession =
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+
     order.status = new_status
     if "comment" in data:
         order.comment = data["comment"]
     await session.commit()
+
+    # Уведомление покупателю
+    status_label = ORDER_STATUSES.get(new_status, new_status)
+    buyer_text = (
+        f"📦 <b>Статус заказа #{order_id} изменён</b>\n\n"
+        f"Новый статус: {status_label}\n\n"
+        f"Сумма заказа: {order.total} ₽"
+    )
+    await _send_telegram(order.user_id, buyer_text)
+
+    # Уведомление администратору
+    admin_text = f"✅ Заказ #{order_id} → статус: {status_label}"
+    await _send_telegram(ADMIN_TG_ID, admin_text)
+
     return {"id": order.id, "status": order.status}
 
 
@@ -114,6 +206,8 @@ def _order_dict(o: Order) -> dict:
     return {
         "id": o.id, "user_id": o.user_id, "total": o.total,
         "status": o.status, "status_label": ORDER_STATUSES.get(o.status, o.status),
-        "comment": o.comment, "created_at": o.created_at.isoformat(),
+        "comment": o.comment,
+        "delivery_address": getattr(o, "delivery_address", None),
+        "created_at": o.created_at.isoformat(),
         "updated_at": o.updated_at.isoformat() if o.updated_at else None,
     }

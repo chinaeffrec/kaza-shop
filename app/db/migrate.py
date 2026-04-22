@@ -1,7 +1,6 @@
 """
-Миграция: приводит существующие таблицы к актуальной схеме.
-Запуск (один раз после обновления кода):
-  docker exec kaza_shop-app-1 python -m app.db.migrate
+Миграция: добавляет недостающие колонки в существующие таблицы.
+Запуск: docker exec kaza_shop-app-1 python -m app.db.migrate
 """
 import asyncio
 import os
@@ -17,19 +16,23 @@ DATABASE_URL = (
 )
 
 MIGRATIONS = [
-    # products — убираем slug если есть, добавляем нужные поля
+    # products
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS image_file_id VARCHAR(512)",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS discount_price INTEGER",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INTEGER DEFAULT 0",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
-    # categories — убираем slug если он там есть (через DROP COLUMN IF EXISTS)
+    # Если characteristics был JSON — меняем на TEXT
+    "ALTER TABLE products ALTER COLUMN characteristics TYPE TEXT USING characteristics::TEXT",
+    # categories/subcategories — убираем slug если есть
     "ALTER TABLE categories DROP COLUMN IF EXISTS slug",
-    # subcategories — убираем slug
     "ALTER TABLE subcategories DROP COLUMN IF EXISTS slug",
     # orders
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS comment TEXT",
-    # новые таблицы создаются через create_all при старте, миграция только для колонок
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_address TEXT",
+    # shop_settings
+    "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS welcome_message TEXT",
+    "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS seller_contact VARCHAR(256)",
 ]
 
 async def run():
