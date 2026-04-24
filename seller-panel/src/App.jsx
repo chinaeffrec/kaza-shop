@@ -10,7 +10,7 @@ import s from './App.module.css'
 
 const NAV = [
   { id: 'products', label: '📦 Товары' },
-  { id: 'orders',   label: '🧾 Заказы' },
+  { id: 'orders', label: '🧾 Заказы', orderBadge: true },
   { id: 'stats',    label: '📊 Статистика' },
   { id: 'import',   label: '📥 Импорт' },
   { id: 'settings', label: '⚙️ Настройки' },
@@ -23,19 +23,60 @@ export default function App() {
   const [page, setPage]             = useState('products')
   const [shopName, setShopName]     = useState('Kaza Shop')
   const [statsState, setStatsState] = useState({ dateFrom:'', dateTo:'', stats:[], products:{}, sort:'ordered' })
+  const [newOrders, setNewOrders] = useState(0)
 
+  // useEffect(() => {
+  //   const token = localStorage.getItem('admin_token')
+  //   if (!token) { setChecked(true); return }
+  //   api.me().then(d => {
+  //     setAuthed(true); setAdminLogin(d.login)
+  //     return api.getSettings()
+  //   }).then(cfg => {
+  //     setShopName(cfg?.shop_name || 'Kaza Shop')
+  //   }).catch(() => {
+  //     localStorage.removeItem('admin_token')
+  //   }).finally(() => setChecked(true))
+  // }, [])
   useEffect(() => {
-    const token = localStorage.getItem('admin_token')
-    if (!token) { setChecked(true); return }
-    api.me().then(d => {
-      setAuthed(true); setAdminLogin(d.login)
+  const token = localStorage.getItem('admin_token')
+  if (!token) {
+    setChecked(true)
+    return
+  }
+
+  let t2 // объявляем здесь, чтобы был доступ в cleanup
+
+  api.me()
+    .then(d => {
+      setAuthed(true)
+      setAdminLogin(d.login)
       return api.getSettings()
-    }).then(cfg => {
+    })
+    .then(cfg => {
       setShopName(cfg?.shop_name || 'Kaza Shop')
-    }).catch(() => {
+
+      // 👇 ВСТАВЛЯЕШЬ ЗДЕСЬ
+      const pollOrders = async () => {
+        try {
+          const orders = await api.getOrders('new')
+          setNewOrders(orders.length)
+        } catch {}
+      }
+
+      pollOrders()
+      t2 = setInterval(pollOrders, 30000)
+    })
+    .catch(() => {
       localStorage.removeItem('admin_token')
-    }).finally(() => setChecked(true))
-  }, [])
+    })
+    .finally(() => setChecked(true))
+
+  // 👇 cleanup
+  return () => {
+    if (t2) clearInterval(t2)
+  }
+
+}, [])
 
   function handleLogin(login) {
     setAuthed(true); setAdminLogin(login)

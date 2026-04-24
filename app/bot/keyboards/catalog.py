@@ -17,29 +17,25 @@ def categories_kb(categories):
 
 def subcategories_kb(subs):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text=s.name,
-                callback_data=f"open_sub_{s.id}"
-            )
-        ]
+        [InlineKeyboardButton(text=s.name, callback_data=f"open_sub_{s.id}")]
         for s in subs
     ] + [
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back")]
+        [
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back"),
+            InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back"),
+        ]
     ])
 
 
 def products_kb(products):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text=p.name,
-                callback_data=f"open_product_{p.id}"
-            )
-        ]
+        [InlineKeyboardButton(text=p.name, callback_data=f"open_product_{p.id}")]
         for p in products
     ] + [
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back")]
+        [
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back"),
+            InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back"),
+        ]
     ])
 
 

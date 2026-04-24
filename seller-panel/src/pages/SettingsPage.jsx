@@ -6,6 +6,7 @@ export default function SettingsPage({ onSaved, adminLogin }) {
   const [shopName, setShopName]         = useState('')
   const [welcomeMsg, setWelcomeMsg]     = useState('')
   const [sellerContact, setSellerContact] = useState('')
+  const [adminContact, setAdminContact] = useState('')
   const [saving, setSaving]             = useState(false)
 
   const [faq, setFaq]         = useState([])
@@ -26,6 +27,7 @@ export default function SettingsPage({ onSaved, adminLogin }) {
       setShopName(cfg.shop_name || 'Kaza Shop')
       setWelcomeMsg(cfg.welcome_message || '👋 Добро пожаловать!\n\nВыберите действие:')
       setSellerContact(cfg.seller_contact || '')
+      setAdminContact(cfg.admin_contact || '')
     }).catch(() => {})
     api.getFaq().then(setFaq).catch(() => {})
   }, [])
@@ -37,6 +39,7 @@ export default function SettingsPage({ onSaved, adminLogin }) {
         shop_name: shopName,
         welcome_message: welcomeMsg,
         seller_contact: sellerContact,
+        admin_contact: adminContact
       })
       onSaved?.(updated)
       alert('Настройки сохранены')
@@ -144,6 +147,15 @@ export default function SettingsPage({ onSaved, adminLogin }) {
         <label className={s.label}>Контакт продавца (для кнопки «Написать нам»)
           <input className={s.input} value={sellerContact} onChange={e=>setSellerContact(e.target.value)}
             placeholder="@username или https://t.me/username" />
+        </label>
+        <label className={s.label}>
+          Telegram ID для уведомлений о заказах
+          <input className={s.input} value={adminContact}
+                 onChange={e => setAdminContact(e.target.value)}
+                 placeholder="123456789 (числовой ID из @userinfobot)" />
+          <span style={{fontSize:11,color:'#aaa',marginTop:2}}>
+            Узнать свой ID: напишите боту @userinfobot в Telegram
+          </span>
         </label>
         <button className={s.btnSave} onClick={saveSettings} disabled={saving}>
           {saving ? 'Сохранение...' : 'Сохранить настройки'}

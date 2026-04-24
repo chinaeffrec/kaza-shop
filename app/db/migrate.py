@@ -33,6 +33,7 @@ MIGRATIONS = [
     # shop_settings
     "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS welcome_message TEXT",
     "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS seller_contact VARCHAR(256)",
+    "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS admin_contact VARCHAR(256)",
 ]
 
 async def run():

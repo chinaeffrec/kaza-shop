@@ -40,6 +40,7 @@ class SettingsUpdate(BaseModel):
     reviews_enabled: Optional[bool] = None
     welcome_message: Optional[str] = None
     seller_contact: Optional[str] = None
+    admin_contact: Optional[str] = None
 
 
 @router.patch("/")
@@ -53,6 +54,8 @@ async def update_settings(data: SettingsUpdate, session: AsyncSession = Depends(
         s.welcome_message = data.welcome_message
     if data.seller_contact is not None:
         s.seller_contact = data.seller_contact
+    if data.admin_contact is not None:
+        s.admin_contact = data.admin_contact
     await session.commit()
     return _settings_dict(s)
 
@@ -99,6 +102,7 @@ def _settings_dict(s: ShopSettings) -> dict:
         "reviews_enabled": s.reviews_enabled,
         "welcome_message": s.welcome_message,
         "seller_contact": s.seller_contact,
+        "admin_contact": s.admin_contact,
     }
 
 

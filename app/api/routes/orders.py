@@ -8,6 +8,7 @@ from app.models.cart import Cart
 from app.models.product import Product
 from app.models.product_stats import ProductStats
 from app.models.user import User
+from app.models.settings import ShopSettings
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -29,6 +30,16 @@ async def _send_telegram(chat_id: int | str, text: str):
     except Exception as e:
         print(f"[orders] Telegram send error: {e}")
 
+async def _get_admin_contact(session: AsyncSession) -> str | None:
+    """Возвращает admin_contact из настроек или ADMIN_TG_ID из env"""
+    try:
+        res = await session.execute(select(ShopSettings).where(ShopSettings.id == 1))
+        s = res.scalar_one_or_none()
+        if s and s.admin_contact:
+            return s.admin_contact
+    except Exception:
+        pass
+    return ADMIN_TG_ID
 
 async def _inc_ordered(product_id: int, qty: int, session: AsyncSession):
     res = await session.execute(
@@ -112,7 +123,8 @@ async def create_order(data: dict, session: AsyncSession = Depends(get_session))
         + (f"🏠 Адрес: {delivery_address}\n" if delivery_address else "")
         + (f"💬 Комментарий: {comment}" if comment else "")
     )
-    await _send_telegram(ADMIN_TG_ID, admin_text)
+    admin_contact = await _get_admin_contact(session)
+    await _send_telegram(admin_contact, admin_text)
 
     return {
         "id": order.id, "user_id": order.user_id,
@@ -197,7 +209,9 @@ async def update_order_status(order_id: int, data: dict, session: AsyncSession =
 
     # Уведомление администратору
     admin_text = f"✅ Заказ #{order_id} → статус: {status_label}"
-    await _send_telegram(ADMIN_TG_ID, admin_text)
+#    await _send_telegram(ADMIN_TG_ID, admin_text)
+    admin_contact = await _get_admin_contact(session)
+    await _send_telegram(admin_contact, admin_text)
 
     return {"id": order.id, "status": order.status}
 

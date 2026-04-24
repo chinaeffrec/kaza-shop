@@ -11,13 +11,26 @@ DEFAULT_WELCOME = "👋 Добро пожаловать!\n\nВыберите д�
 
 @router.message(Command("start"))
 async def start_handler(message: Message):
+    # Регистрируем пользователя
+    user = message.from_user
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=3) as client:
+            await client.post(f"{BASE_URL}/users/register", json={
+                "id": user.id,
+                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+            })
+    except Exception:
+        pass
+
     welcome_text = DEFAULT_WELCOME
     try:
         async with httpx.AsyncClient(timeout=3) as client:
             r = await client.get(f"{BASE_URL}/settings/")
             if r.status_code == 200:
-                cfg = r.json()
-                welcome_text = cfg.get("welcome_message") or DEFAULT_WELCOME
+                welcome_text = r.json().get("welcome_message") or DEFAULT_WELCOME
     except Exception:
         pass
 

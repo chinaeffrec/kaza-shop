@@ -15,9 +15,10 @@ async def _inc_cart_stat(product_id: int, session: AsyncSession):
     )
     s = res.scalar_one_or_none()
     if not s:
-        s = ProductStats(product_id=product_id)
+        s = ProductStats(product_id=product_id, added_to_cart=0, ordered=0, returned=0)
         session.add(s)
-    s.added_to_cart += 1
+        await session.flush()   # <-- инициализирует объект, иначе поля = None
+    s.added_to_cart = (s.added_to_cart or 0) + 1
 
 
 @router.post("/", response_model=None)
@@ -51,11 +52,11 @@ async def get_cart(user_id: int, session: AsyncSession = Depends(get_session)):
     items = []
     total = 0
     for cart, product in rows:
-        items_total = product.price * cart.quantity
-        total += items_total
+        item_total = product.price * cart.quantity
+        total += item_total
         items.append({
             "product_id": product.id, "name": product.name,
-            "price": product.price, "quantity": cart.quantity, "sum": items_total,
+            "price": product.price, "quantity": cart.quantity, "sum": item_total,
         })
     return {"items": items, "total": total}
 

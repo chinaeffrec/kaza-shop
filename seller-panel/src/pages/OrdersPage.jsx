@@ -21,6 +21,12 @@ export default function OrdersPage() {
   }, [filter])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => {
+  const t = setInterval(() => {
+    load()
+  }, 30000)  // обновляем каждые 30 секунд
+  return () => clearInterval(t)
+}, [load])
 
   async function expand(order) {
     if (expanded === order.id) { setExpanded(null); setDetail(null); return }

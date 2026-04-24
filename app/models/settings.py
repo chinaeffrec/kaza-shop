@@ -14,6 +14,7 @@ class ShopSettings(Base):
     )
 
     seller_contact: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    admin_contact: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
     id: Mapped[int] = mapped_column(primary_key=True, default=1)
     shop_name: Mapped[str] = mapped_column(String(128), default="Kaza Shop")

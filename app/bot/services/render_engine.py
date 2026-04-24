@@ -1,5 +1,7 @@
 import httpx
-from aiogram.types import InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton, Message
+)
 
 from app.bot.services.catalog_cache import catalog_cache
 from app.bot.keyboards.catalog import categories_kb, subcategories_kb
@@ -9,48 +11,22 @@ MEDIA_BASE = "http://app:8000/media"
 
 
 def _fmt_price(price) -> str:
-    """
-    Форматирует цену:
-    1000    → 1 000 ₽
-    112000  → 112 000 ₽
-    55.99   → 55.99 ₽  (если дробная часть не ноль)
-    """
     if price is None:
         return "—"
     try:
         price = float(price)
     except (TypeError, ValueError):
         return str(price)
-
-    # Если дробная часть ненулевая — показываем копейки
     if price != int(price):
-        # Форматируем с двумя знаками после запятой, разделитель тысяч — пробел
         whole = int(price)
-        frac = round(price - whole, 2)
-        frac_str = f"{frac:.2f}"[1:]  # .99
+        frac_str = f"{price:.2f}"[len(str(whole)):]
         whole_str = f"{whole:,}".replace(",", " ")
         return f"{whole_str}{frac_str} ₽"
-    else:
-        return f"{int(price):,}".replace(",", " ") + " ₽"
+    return f"{int(price):,}".replace(",", " ") + " ₽"
 
 
-async def _render_product_card(message, product, idx: int, total: int):
-    sub = catalog_cache.get_subcategory_by_id(product.subcategory_id)
-    products = sub.products if sub else [product]
-
-    lines = [f"📦 <b>{product.name}</b>"]
-    if getattr(product, "discount_price", None):
-        lines.append(
-            f"💰 <s>{_fmt_price(product.price)}</s> → <b>{_fmt_price(product.discount_price)}</b>"
-        )
-    else:
-        lines.append(f"💰 <b>{_fmt_price(product.price)}</b>")
-    if product.description:
-        lines.append(f"\n{product.description}")
-    if product.characteristics:
-        lines.append(f"\n📋 <i>{product.characteristics}</i>")
-    text = "\n".join(lines)
-
+def _product_kb(product, idx: int, total: int, products: list) -> InlineKeyboardMarkup:
+    """Клавиатура карточки товара с навигацией"""
     nav_row = []
     if idx > 0:
         nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"open_product_{products[idx-1].id}"))
@@ -58,92 +34,171 @@ async def _render_product_card(message, product, idx: int, total: int):
     if idx < total - 1:
         nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"open_product_{products[idx+1].id}"))
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
+    return InlineKeyboardMarkup(inline_keyboard=[
         nav_row,
         [
             InlineKeyboardButton(text="➖", callback_data=f"cart_dec_{product.id}"),
             InlineKeyboardButton(text="🛒 В корзину", callback_data=f"cart_add_{product.id}"),
             InlineKeyboardButton(text="➕", callback_data=f"cart_inc_{product.id}"),
         ],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back")],
+        [
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back"),
+            InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back"),
+        ],
     ])
+
+
+def _product_caption(product) -> str:
+    lines = [f"<b>{product.name}</b>"]
+    if getattr(product, "discount_price", None):
+        lines.append(f"💰 <s>{_fmt_price(product.price)}</s> → <b>{_fmt_price(product.discount_price)}</b>")
+    else:
+        lines.append(f"💰 <b>{_fmt_price(product.price)}</b>")
+    # Сначала характеристики, потом описание
+    if product.characteristics:
+        lines.append(f"\n📋 {product.characteristics}")
+    if product.description:
+        lines.append(f"\n{product.description}")
+    return "\n".join(lines)
+
+
+async def _edit_to_text(message: Message, text: str, kb: InlineKeyboardMarkup):
+    """Редактирует сообщение в текстовое. Работает и если сообщение с фото."""
+    try:
+        # Если сообщение с фото — меняем caption
+        if message.photo or message.document:
+            await message.edit_caption(caption=text, reply_markup=kb, parse_mode="HTML")
+        else:
+            await message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        # Fallback если что-то пошло не так
+        try:
+            await message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        except Exception:
+            pass
+
+
+async def _edit_to_photo(message: Message, photo_url: str, caption: str, kb: InlineKeyboardMarkup):
+    """
+    Показывает фото. Если сообщение уже с фото — edit_media.
+    Если текстовое — edit_media с InputMediaPhoto тоже работает в Telegram,
+    но только если сообщение пришло от бота. Пробуем, при ошибке — текст.
+    """
+    try:
+        await message.edit_media(
+            media=InputMediaPhoto(media=photo_url, caption=caption, parse_mode="HTML"),
+            reply_markup=kb,
+        )
+    except Exception as e:
+        err = str(e).lower()
+        # Telegram говорит "there is no media in the message" если сообщение текстовое
+        # В этом случае просто показываем текст с фото-иконкой
+        if "no media" in err or "media" in err or "message_type" in err:
+            # Добавляем иконку что есть фото, показываем как текст
+            text_with_icon = f"🖼 <a href='{photo_url}'>Фото товара</a>\n\n{caption}"
+            try:
+                await message.edit_text(text_with_icon, reply_markup=kb,
+                                        parse_mode="HTML", disable_web_page_preview=False)
+            except Exception:
+                await message.edit_text(caption, reply_markup=kb, parse_mode="HTML")
+        else:
+            # Другая ошибка — просто текст
+            await message.edit_text(caption, reply_markup=kb, parse_mode="HTML")
+
+
+async def render_product_card(message: Message, product, idx: int, total: int):
+    """Публичная функция — вызывается из catalog.py для стрелок-навигации"""
+    sub = catalog_cache.get_subcategory_by_id(product.subcategory_id)
+    products = sub.products if sub else [product]
+    kb = _product_kb(product, idx, total, products)
+    caption = _product_caption(product)
 
     if product.image:
         image_url = f"{MEDIA_BASE}/{product.image}"
-        try:
-            return await message.edit_media(
-                media=InputMediaPhoto(media=image_url, caption=text, parse_mode="HTML"),
-                reply_markup=kb,
-            )
-        except Exception as e:
-            print(f"[render] Image send failed ({product.image}): {e}")
-
-    return await message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        await _edit_to_photo(message, image_url, caption, kb)
+    else:
+        await _edit_to_text(message, caption, kb)
 
 
 class RenderEngine:
 
-    async def render(self, screen, message):
+    async def render(self, screen, message: Message):
 
         if screen.type == "categories":
             categories = catalog_cache.get_categories()
-            return await message.edit_text(
+            await _edit_to_text(
+                message,
                 "🗂 <b>Каталог</b>\n\nВыберите категорию:",
-                reply_markup=categories_kb(categories),
-                parse_mode="HTML",
+                categories_kb(categories),
             )
 
-        if screen.type == "subcategories":
+        elif screen.type == "subcategories":
             category = catalog_cache.get_category(screen.category_id)
             if not category:
-                return await message.edit_text("Категория не найдена")
-            return await message.edit_text(
+                await _edit_to_text(message, "Категория не найдена",
+                                    InlineKeyboardMarkup(inline_keyboard=[[
+                                        InlineKeyboardButton(text="⬅️ Назад", callback_data="back")
+                                    ]]))
+                return
+            await _edit_to_text(
+                message,
                 f"📁 <b>{category.name}</b>\n\nВыберите подкатегорию:",
-                reply_markup=subcategories_kb(category.subcategories),
-                parse_mode="HTML",
+                subcategories_kb(category.subcategories),
             )
 
-        if screen.type == "products":
+        elif screen.type == "products":
             sub = catalog_cache.get_subcategory_by_id(screen.subcategory_id)
             if not sub:
-                return await message.edit_text("Подкатегория не найдена")
+                await _edit_to_text(message, "Подкатегория не найдена",
+                                    InlineKeyboardMarkup(inline_keyboard=[[
+                                        InlineKeyboardButton(text="⬅️ Назад", callback_data="back")
+                                    ]]))
+                return
             if not sub.products:
-                return await message.edit_text(
+                await _edit_to_text(
+                    message,
                     f"📁 <b>{sub.name}</b>\n\nТоваров нет.",
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back")]
-                    ]),
-                    parse_mode="HTML",
+                    InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="⬅️ Назад", callback_data="back"),
+                        InlineKeyboardButton(text="🏠 Меню", callback_data="menu_back"),
+                    ]]),
                 )
-            return await _render_product_card(message, sub.products[0], 0, len(sub.products))
+                return
+            await render_product_card(message, sub.products[0], 0, len(sub.products))
 
-        if screen.type == "product":
+        elif screen.type == "product":
             product = catalog_cache.get_product(screen.product_id)
             if not product:
-                return await message.edit_text("Товар не найден")
+                await _edit_to_text(message, "Товар не найден",
+                                    InlineKeyboardMarkup(inline_keyboard=[[
+                                        InlineKeyboardButton(text="⬅️ Назад", callback_data="back")
+                                    ]]))
+                return
             sub = catalog_cache.get_subcategory_by_id(product.subcategory_id)
             products = sub.products if sub else [product]
             idx = next((i for i, p in enumerate(products) if p.id == product.id), 0)
-            return await _render_product_card(message, product, idx, len(products))
+            await render_product_card(message, product, idx, len(products))
 
-        if screen.type == "cart":
+        elif screen.type == "cart":
             from app.bot.handlers.menu import build_cart_text, build_cart_keyboard
             user_id = message.chat.id
             async with httpx.AsyncClient() as client:
                 response = await client.get(f"{BASE_URL}/cart/{user_id}")
             data = response.json()
             if not data.get("items"):
-                return await message.edit_text(
+                await _edit_to_text(
+                    message,
                     "🛒 Ваша корзина пуста",
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu_back")]
-                    ]),
+                    InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="⬅️ В меню", callback_data="menu_back")
+                    ]]),
                 )
-            return await message.edit_text(
-                build_cart_text(data),
-                reply_markup=build_cart_keyboard(data),
-                parse_mode="HTML",
-            )
+            else:
+                await _edit_to_text(
+                    message,
+                    build_cart_text(data),
+                    build_cart_keyboard(data),
+                )
 
 
 render_engine = RenderEngine()

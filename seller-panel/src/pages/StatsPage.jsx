@@ -32,15 +32,19 @@ export default function StatsPage({ saved, onSave }) {
 
   useEffect(() => { load() }, [])
 
-  const sorted = [...stats].sort((a,b) => (b[sort]||0) - (a[sort]||0))
+  const sorted = [...stats].sort((a,b) => {
+  const av = Number(a[sort]) || 0
+  const bv = Number(b[sort]) || 0
+  return bv - av
+})
 
   const th = (col, label) => (
-    <th className={s.sortable} onClick={() => {
-      setSort(col)
-      onSave?.({ dashboard, stats, products, dateFrom, dateTo, sort: col })
-    }}>
-      {label}{sort===col?' ▼':''}
-    </th>
+      <th className={s.sortable} style={{cursor:'pointer'}} onClick={() => {
+        setSort(col)
+        onSave?.({ dashboard, stats, products, dateFrom, dateTo, sort: col })
+      }}>
+        {label}{sort === col ? ' ▼' : ' ↕'}
+      </th>
   )
 
   const fmt = (n) => (n||0).toLocaleString('ru-RU')
@@ -62,8 +66,8 @@ export default function StatsPage({ saved, onSave }) {
       </div>
 
       <div className={s.tabs}>
-        <button className={`${s.tab} ${tab==='dashboard'?s.activeTab:''}`} onClick={()=>setTab('dashboard')}>📊 Дашборд</button>
-        <button className={`${s.tab} ${tab==='products'?s.activeTab:''}`} onClick={()=>setTab('products')}>📦 По товарам</button>
+        <button className={`${s.tab} ${tab==='dashboard'?s.activeTab:''}`} onClick={()=>setTab('dashboard')}>📊 Заказы</button>
+        <button className={`${s.tab} ${tab==='products'?s.activeTab:''}`} onClick={()=>setTab('products')}>📦 Товары</button>
       </div>
 
       {tab === 'dashboard' && dashboard && (
