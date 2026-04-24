@@ -13,12 +13,20 @@ export default function StatsPage({ saved, onSave }) {
   const [sortDir, setSortDir]     = useState(saved?.sortDir || 'desc')
   const [tab, setTab]             = useState('dashboard')
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (nextFilters = {}) => {
+    const from = nextFilters.dateFrom ?? dateFrom
+    const to = nextFilters.dateTo ?? dateTo
+
+    if (from && to && from > to) {
+      alert('Дата "По" не может быть раньше даты "С"')
+      return
+    }
+
     setLoading(true)
     try {
       const [dash, st, prods] = await Promise.all([
-        api.getDashboard(dateFrom || null, dateTo || null),
-        api.getStats(dateFrom || null, dateTo || null),
+        api.getDashboard(from || null, to || null),
+        api.getStats(from || null, to || null),
         api.getProducts(),
       ])
       const map = {}
@@ -26,12 +34,12 @@ export default function StatsPage({ saved, onSave }) {
       setDashboard(dash)
       setStats(st)
       setProducts(map)
-      onSave?.({ dashboard: dash, stats: st, products: map, dateFrom, dateTo, sort, sortDir })
+      onSave?.({ dashboard: dash, stats: st, products: map, dateFrom: from, dateTo: to, sort, sortDir })
     } catch(e) { alert(e.message) }
     finally { setLoading(false) }
   }, [dateFrom, dateTo, onSave, sort, sortDir])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, [])
 
   const sorted = [...stats].sort((a, b) => {
     const av = Number(a[sort] ?? 0)
@@ -75,7 +83,7 @@ export default function StatsPage({ saved, onSave }) {
         <button className={s.btnReset} onClick={()=>{
           setDateFrom('')
           setDateTo('')
-          onSave?.({ ...saved, dateFrom:'', dateTo:'', sort, sortDir })
+          load({ dateFrom: '', dateTo: '' })
         }}>Сбросить</button>
       </div>
 

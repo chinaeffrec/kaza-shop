@@ -1,5 +1,16 @@
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
+function buildQuery(params) {
+  const query = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      query.set(key, value)
+    }
+  })
+  const qs = query.toString()
+  return qs ? `?${qs}` : ''
+}
+
 async function req(method, path, body, isFormData = false) {
   const opts = { method, headers: {} }
   const token = localStorage.getItem('admin_token')
@@ -80,13 +91,13 @@ export const api = {
     return req('POST', '/import/products', fd, true)
   },
   // Orders
-  getOrders:        (status) => req('GET', `/orders/${status ? `?status=${status}` : ''}`),
+  getOrders:        (status) => req('GET', `/orders/${buildQuery({ status })}`),
   getOrder:         (id) => req('GET', `/orders/${id}`),
   getOrderStatuses: () => req('GET', '/orders/statuses'),
   updateOrderStatus:(id, status, comment) => req('PATCH', `/orders/${id}/status`, { status, comment }),
   // Stats
-  getDashboard: (from, to) => req('GET', `/stats/dashboard${from ? `?date_from=${from}&date_to=${to}` : ''}`),
-  getStats:     (from, to) => req('GET', `/stats/products${from ? `?date_from=${from}&date_to=${to}` : ''}`),
+  getDashboard: (from, to) => req('GET', `/stats/dashboard${buildQuery({ date_from: from, date_to: to })}`),
+  getStats:     (from, to) => req('GET', `/stats/products${buildQuery({ date_from: from, date_to: to })}`),
   trackReturn:  (pid) => req('POST', `/stats/products/${pid}/return`),
   // Settings
   getSettings:    () => req('GET', '/settings/'),
