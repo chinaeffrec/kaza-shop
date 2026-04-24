@@ -17,7 +17,8 @@ async def refresh_cart(callback: CallbackQuery):
         return
     await callback.message.edit_text(
         build_cart_text(data),
-        reply_markup=build_cart_keyboard(data)
+        reply_markup=build_cart_keyboard(data),
+        parse_mode="HTML",
     )
 
 @router.callback_query(F.data.startswith("inc_"))

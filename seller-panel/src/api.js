@@ -22,6 +22,36 @@ async function req(method, path, body, isFormData = false) {
   return res.json()
 }
 
+async function downloadFile(path, fallbackName) {
+  const token = localStorage.getItem('admin_token')
+  const res = await fetch(`${BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (res.status === 401) {
+    localStorage.removeItem('admin_token')
+    window.location.reload()
+    throw new Error('Unauthorized')
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || 'Download failed')
+  }
+
+  const blob = await res.blob()
+  const contentDisposition = res.headers.get('content-disposition') || ''
+  const matchedName = contentDisposition.match(/filename="?([^"]+)"?/)
+  const filename = matchedName?.[1] || fallbackName
+
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
 export const api = {
   BASE,
   // Auth
@@ -61,6 +91,7 @@ export const api = {
   // Settings
   getSettings:    () => req('GET', '/settings/'),
   updateSettings: (d) => req('PATCH', '/settings/', d),
+  downloadLogs:   () => downloadFile('/settings/logs/download', 'kaza-shop-logs.zip'),
   // FAQ
   getFaq:    () => req('GET', '/faq/'),
   createFaq: (d) => req('POST', '/faq/', d),

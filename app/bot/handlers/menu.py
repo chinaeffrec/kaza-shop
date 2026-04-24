@@ -1,4 +1,5 @@
 from aiogram import Router, F
+from aiogram.filters import StateFilter
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -6,6 +7,7 @@ from aiogram.fsm.state import State, StatesGroup
 from app.bot.services.navigation import navigation
 from app.bot.states.screen import Screen
 from app.bot.services.render_engine import render_engine
+from app.bot.keyboards.menu import main_menu
 
 router = Router()
 BASE_URL = "http://app:8000"
@@ -14,6 +16,20 @@ BASE_URL = "http://app:8000"
 class CheckoutState(StatesGroup):
     waiting_comment = State()
     waiting_address = State()
+
+
+async def _replace_with_text(message: Message, text: str, reply_markup=None, parse_mode=None):
+    try:
+        if message.photo or message.document:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            await message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        else:
+            await message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception:
+        await message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
 
 # ─────────────────────────────────────────
@@ -73,14 +89,16 @@ async def open_cart(callback: CallbackQuery):
     data = response.json()
 
     if not data.get("items"):
-        await callback.message.edit_text(
+        await _replace_with_text(
+            callback.message,
             "🛒 Ваша корзина пуста",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu_back")]
             ])
         )
     else:
-        await callback.message.edit_text(
+        await _replace_with_text(
+            callback.message,
             build_cart_text(data),
             reply_markup=build_cart_keyboard(data),
             parse_mode="HTML"
@@ -121,7 +139,7 @@ async def open_order_status(callback: CallbackQuery):
         kb_rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="menu_back")])
         kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await _replace_with_text(callback.message, text, reply_markup=kb, parse_mode="HTML")
     await callback.answer()
 
 
@@ -142,7 +160,8 @@ async def order_history(callback: CallbackQuery):
             lines.append(f"✔️ Заказ #{o['id']} — {_fmt_price(o['total'])} · {o['created_at'][:10]}")
         text = "\n".join(lines)
 
-    await callback.message.edit_text(
+    await _replace_with_text(
+        callback.message,
         text,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Мои заказы", callback_data="menu_order")]
@@ -163,7 +182,8 @@ async def open_question(callback: CallbackQuery):
                 contact = r.json().get("seller_contact") or contact
     except Exception:
         pass
-    await callback.message.edit_text(
+    await _replace_with_text(
+        callback.message,
         f"💬 <b>Написать нам</b>\n\nСвяжитесь с нами напрямую:\n{contact}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu_back")]
@@ -176,7 +196,6 @@ async def open_question(callback: CallbackQuery):
 @router.callback_query(F.data == "menu_back")
 async def menu_back(callback: CallbackQuery, state: FSMContext):
     import httpx
-    from app.bot.keyboards.menu import main_menu
     navigation.reset(callback.from_user.id)
     await state.clear()
     welcome_text = "👋 Добро пожаловать!\n\nВыберите действие:"
@@ -187,7 +206,7 @@ async def menu_back(callback: CallbackQuery, state: FSMContext):
                 welcome_text = r.json().get("welcome_message") or welcome_text
     except Exception:
         pass
-    await callback.message.edit_text(welcome_text, reply_markup=main_menu())
+    await _replace_with_text(callback.message, welcome_text, reply_markup=main_menu())
     await callback.answer()
 
 
@@ -196,8 +215,9 @@ async def menu_back(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "checkout")
 async def checkout_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(CheckoutState.waiting_comment)
-    await callback.message.edit_text(
-        "💬 Оставьте комментарий к заказу\n(или нажмите /skip чтобы пропустить):",
+    await _replace_with_text(
+        callback.message,
+        "💬 Оставьте комментарий к заказу\n(или нажмите кнопку «Пропустить»):",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⏭ Пропустить", callback_data="checkout_skip_comment")]
         ])
@@ -209,35 +229,46 @@ async def checkout_start(callback: CallbackQuery, state: FSMContext):
 async def checkout_skip_comment(callback: CallbackQuery, state: FSMContext):
     await state.update_data(comment="")
     await state.set_state(CheckoutState.waiting_address)
-    await callback.message.edit_text(
-        "🏠 Укажите адрес доставки\n(или нажмите «Пропустить» для самовывоза):",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⏭ Пропустить / Самовывоз", callback_data="checkout_skip_address")]
-        ])
-    )
+    await _replace_with_text(callback.message, "🏠 Укажите адрес доставки:")
     await callback.answer()
 
 
-@router.message(CheckoutState.waiting_comment)
+@router.message(CheckoutState.waiting_comment, F.text)
 async def checkout_comment(message: Message, state: FSMContext):
     comment = "" if message.text == "/skip" else message.text
     await state.update_data(comment=comment)
     await state.set_state(CheckoutState.waiting_address)
-    await message.answer(
-        "🏠 Укажите адрес доставки\n(или /skip для самовывоза):"
-    )
+    await message.answer("🏠 Укажите адрес доставки:")
 
 
-@router.message(CheckoutState.waiting_address)
+@router.message(CheckoutState.waiting_address, F.text)
 async def checkout_address(message: Message, state: FSMContext):
-    address = "" if message.text == "/skip" else message.text
+    address = (message.text or "").strip()
+    if not address or address == "/skip":
+        await message.answer("🏠 Нужно указать адрес доставки. Самовывоза сейчас нет.")
+        return
     await _finalize_order(message, state, address)
 
 
 @router.callback_query(F.data == "checkout_skip_address")
 async def checkout_skip_address(callback: CallbackQuery, state: FSMContext):
-    await _finalize_order(callback.message, state, "")
-    await callback.answer()
+    await callback.answer("Самовывоза сейчас нет. Укажите адрес доставки сообщением.", show_alert=True)
+    await state.set_state(CheckoutState.waiting_address)
+
+
+@router.message(CheckoutState.waiting_comment)
+async def checkout_comment_non_text(message: Message):
+    await message.answer(
+        "💬 Комментарий можно отправить только текстом.\nИли нажмите кнопку «Пропустить».",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Пропустить", callback_data="checkout_skip_comment")]
+        ])
+    )
+
+
+@router.message(CheckoutState.waiting_address)
+async def checkout_address_non_text(message: Message):
+    await message.answer("🏠 Адрес доставки нужно отправить текстовым сообщением.")
 
 
 async def _finalize_order(message, state: FSMContext, address: str):
@@ -268,10 +299,18 @@ async def _finalize_order(message, state: FSMContext, address: str):
     else:
         text = "❌ Ошибка при оформлении заказа. Попробуйте ещё раз."
 
-    from app.bot.keyboards.menu import main_menu
     await message.answer(text, reply_markup=main_menu(), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("noop_"))
 async def noop(callback: CallbackQuery):
     await callback.answer()
+
+
+@router.message(StateFilter(None))
+async def unexpected_message(message: Message):
+    await message.answer(
+        "ℹ️ Бот принимает свободный текст только там, где сам его запрашивает.\n"
+        "В остальных случаях используйте кнопки меню.",
+        reply_markup=main_menu()
+    )

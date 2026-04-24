@@ -22,9 +22,13 @@
 .btnSmDanger{background:#fce4e4;padding:4px 8px;border-radius:6px;font-size:12px;border:none;cursor:pointer}
 .empty{color:#aaa;font-size:13px}
 .logsHead{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px}
+.logsActions{display:flex;gap:8px;flex-wrap:wrap}
+.logsHint{font-size:12px;color:#888;line-height:1.5;margin-bottom:12px}
 .btnRefresh{background:#f0f0f0;padding:7px 14px;border-radius:8px;font-size:13px;border:none;cursor:pointer}
 .btnRefresh:disabled{opacity:.6}
 .btnCacheReset{background:#e8f5e9;color:#2e7d32;padding:7px 14px;border-radius:8px;font-size:13px;border:none;cursor:pointer}
+.btnLogsDownload{background:#e3f2fd;color:#1565c0;padding:7px 14px;border-radius:8px;font-size:13px;border:none;cursor:pointer}
+.btnLogsDownload:disabled{opacity:.6}
 .logsBox{background:#1e1e2e;border-radius:8px;padding:14px 16px;max-height:240px;overflow-y:auto;margin-top:12px}
 .logLine{font-family:monospace;font-size:13px;color:#a6e3a1;padding:3px 0;border-bottom:1px solid #313244}
 .logLine:last-child{border-bottom:none}

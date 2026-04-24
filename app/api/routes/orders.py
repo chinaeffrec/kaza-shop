@@ -1,4 +1,6 @@
+import logging
 import os
+import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -11,24 +13,49 @@ from app.models.user import User
 from app.models.settings import ShopSettings
 
 router = APIRouter(prefix="/orders", tags=["orders"])
+logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_TG_ID = os.getenv("ADMIN_TG_ID")  # Telegram ID администратора для уведомлений
 
+MENU_REPLY_MARKUP = {
+    "inline_keyboard": [
+        [{"text": "🏠 В меню", "callback_data": "menu_back"}]
+    ]
+}
 
-async def _send_telegram(chat_id: int | str, text: str):
+async def _send_telegram(chat_id: int | str, text: str, reply_markup: dict | None = None):
     """Отправляет сообщение через Telegram Bot API"""
     if not BOT_TOKEN or not chat_id:
-        return
+        return False
+
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": str(chat_id), "text": text, "parse_mode": "HTML"}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=5) as client:
-            await client.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
-            )
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(url, json=payload)
+            data = response.json()
+            if response.is_success and data.get("ok"):
+                return True
+
+            description = data.get("description") if isinstance(data, dict) else response.text
+            logger.warning("Telegram send failed chat_id=%s: %s", chat_id, description)
+
+            fallback_payload = {"chat_id": str(chat_id), "text": re.sub(r'<[^>]+>', '', text)}
+            if reply_markup:
+                fallback_payload["reply_markup"] = reply_markup
+            fallback_response = await client.post(url, json=fallback_payload)
+            fallback_data = fallback_response.json()
+            if fallback_response.is_success and fallback_data.get("ok"):
+                return True
+            fallback_description = fallback_data.get("description") if isinstance(fallback_data, dict) else fallback_response.text
+            logger.warning("Telegram fallback failed chat_id=%s: %s", chat_id, fallback_description)
     except Exception as e:
-        print(f"[orders] Telegram send error: {e}")
+        logger.exception("Telegram send error: %s", e)
+    return False
 
 async def _get_admin_contact(session: AsyncSession) -> str | None:
     """Возвращает admin_contact из настроек или ADMIN_TG_ID из env"""
@@ -164,15 +191,24 @@ async def get_order(order_id: int, session: AsyncSession = Depends(get_session))
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     items_result = await session.execute(
-        select(OrderItem).where(OrderItem.order_id == order_id)
+        select(OrderItem, Product)
+        .outerjoin(Product, OrderItem.product_id == Product.id)
+        .where(OrderItem.order_id == order_id)
     )
-    items = items_result.scalars().all()
+    items = items_result.all()
 
     d = _order_dict(order)
     d["items"] = [
-        {"product_id": i.product_id, "name": i.name,
-         "price": i.price, "quantity": i.quantity, "sum": i.price * i.quantity}
-        for i in items
+        {
+            "product_id": item.product_id,
+            "name": item.name,
+            "price": item.price,
+            "quantity": item.quantity,
+            "sum": item.price * item.quantity,
+            "image_file_id": product.image_file_id if product else None,
+            "image_url": f"/media/{product.image_file_id}" if product and product.image_file_id else None,
+        }
+        for item, product in items
     ]
 
     user_res = await session.execute(select(User).where(User.id == order.user_id))
@@ -205,7 +241,7 @@ async def update_order_status(order_id: int, data: dict, session: AsyncSession =
         f"Новый статус: {status_label}\n\n"
         f"Сумма заказа: {order.total} ₽"
     )
-    await _send_telegram(order.user_id, buyer_text)
+    await _send_telegram(order.user_id, buyer_text, reply_markup=MENU_REPLY_MARKUP)
 
     # Уведомление администратору
     admin_text = f"✅ Заказ #{order_id} → статус: {status_label}"

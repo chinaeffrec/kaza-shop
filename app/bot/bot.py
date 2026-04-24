@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 
 from aiogram import Bot, Dispatcher
@@ -12,13 +13,17 @@ from app.bot.handlers.cart import router as cart_router
 from app.bot.handlers.cart_actions import router as cart_actions_router
 
 from app.bot.services.catalog_cache import catalog_cache
+from app.logging_setup import configure_logging
+
+configure_logging("bot")
+logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 
 async def on_startup(bot: Bot):
     await catalog_cache.load()
-    print("[bot] Catalog cache loaded")
+    logger.info("Catalog cache loaded")
 
 
 async def main():
@@ -39,7 +44,7 @@ async def main():
 
     async def handle_reload(request):
         await catalog_cache.load()
-        print("[bot] Cache reloaded via HTTP")
+        logger.info("Cache reloaded via HTTP")
         return web.Response(text="ok")
 
     http_app = web.Application()
@@ -48,7 +53,7 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", 8001)
     await site.start()
-    print("[bot] Cache reload server on :8001")
+    logger.info("Cache reload server on :8001")
 
     await dp.start_polling(bot)
 

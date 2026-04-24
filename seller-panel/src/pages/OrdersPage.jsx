@@ -90,10 +90,22 @@ export default function OrdersPage() {
                   <h4 className={s.subTitle}>Товары</h4>
                   {!detail ? <p className={s.loadingTxt}>Загрузка...</p> : (
                     <table className={s.itemsTable}>
-                      <thead><tr><th>Товар</th><th>Цена</th><th>Кол-во</th><th>Сумма</th></tr></thead>
+                      <thead><tr><th>Фото</th><th>Товар</th><th>Цена</th><th>Кол-во</th><th>Сумма</th></tr></thead>
                       <tbody>
                         {detail.items?.map((it,i) => (
                           <tr key={i}>
+                            <td className={s.photoCell}>
+                              {it.image_url ? (
+                                <img
+                                  src={`${api.BASE}${it.image_url}`}
+                                  alt={it.name}
+                                  className={s.thumb}
+                                  onError={e => { e.currentTarget.style.display = 'none' }}
+                                />
+                              ) : (
+                                <span className={s.thumbFallback}>нет</span>
+                              )}
+                            </td>
                             <td>{it.name}</td>
                             <td>{(it.price||0).toLocaleString()} ₽</td>
                             <td>{it.quantity}</td>
@@ -101,7 +113,7 @@ export default function OrdersPage() {
                           </tr>
                         ))}
                         <tr className={s.totalRow}>
-                          <td colSpan={3}><b>Итого</b></td>
+                          <td colSpan={4}><b>Итого</b></td>
                           <td><b>{(o.total||0).toLocaleString()} ₽</b></td>
                         </tr>
                       </tbody>

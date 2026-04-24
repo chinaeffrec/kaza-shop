@@ -8,6 +8,7 @@ from app.db.session import get_session
 from app.models.product_stats import ProductStats
 from app.models.order import Order, OrderItem, ORDER_STATUSES
 from app.models.product import Product
+from app.models.user import User
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
@@ -30,10 +31,10 @@ async def get_dashboard(
     date_to: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
 ):
-    """Сводный дашборд: выручка, заказы, топ товаров"""
+    """Сводный дашборд по заказам: выручка, статусы, последние заказы"""
 
     # Базовый запрос заказов
-    orders_q = select(Order)
+    orders_q = select(Order).order_by(Order.created_at.desc())
     if date_from:
         orders_q = orders_q.where(Order.created_at >= datetime.fromisoformat(date_from))
     if date_to:
@@ -42,53 +43,55 @@ async def get_dashboard(
     orders_res = await session.execute(orders_q)
     all_orders = orders_res.scalars().all()
 
-    total_revenue = sum(o.total for o in all_orders if o.status not in ("cancelled", "returned"))
+    billable_orders = [o for o in all_orders if o.status not in ("cancelled", "returned")]
+    total_revenue = sum(o.total for o in billable_orders)
     total_orders = len(all_orders)
+    billable_orders_count = len(billable_orders)
+    average_order_value = int(total_revenue / billable_orders_count) if billable_orders_count else 0
     by_status = {}
     for o in all_orders:
         by_status[o.status] = by_status.get(o.status, 0) + 1
 
-    # Топ товаров — по выручке и по количеству
-    items_q = (
-        select(
-            OrderItem.product_id,
-            OrderItem.name,
-            func.sum(OrderItem.quantity).label("total_qty"),
-            func.sum(OrderItem.price * OrderItem.quantity).label("total_sum"),
-        )
-        .join(Order, OrderItem.order_id == Order.id)
-        .where(Order.status.not_in(["cancelled", "returned"]))
-        .group_by(OrderItem.product_id, OrderItem.name)
-    )
-    if date_from:
-        items_q = items_q.where(Order.created_at >= datetime.fromisoformat(date_from))
-    if date_to:
-        items_q = items_q.where(Order.created_at <= datetime.fromisoformat(date_to + "T23:59:59"))
+    user_map = {}
+    user_ids = {o.user_id for o in all_orders}
+    if user_ids:
+        users_res = await session.execute(select(User).where(User.id.in_(user_ids)))
+        users = users_res.scalars().all()
+        user_map = {u.id: u for u in users}
 
-    items_res = await session.execute(items_q)
-    items_rows = items_res.all()
+    status_order = list(ORDER_STATUSES.keys())
+    sorted_statuses = [s for s in status_order if s in by_status] + [s for s in by_status if s not in status_order]
 
-    top_by_revenue = sorted(items_rows, key=lambda r: r.total_sum or 0, reverse=True)[:10]
-    top_by_qty = sorted(items_rows, key=lambda r: r.total_qty or 0, reverse=True)[:10]
+    recent_orders = []
+    for order in all_orders[:10]:
+        user = user_map.get(order.user_id)
+        user_name = f"ID:{order.user_id}"
+        if user:
+            user_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or user_name
+
+        recent_orders.append({
+            "id": order.id,
+            "user_id": order.user_id,
+            "user_name": user_name,
+            "status": order.status,
+            "status_label": ORDER_STATUSES.get(order.status, order.status),
+            "total": order.total,
+            "comment": order.comment,
+            "delivery_address": order.delivery_address,
+            "created_at": order.created_at.isoformat() if order.created_at else None,
+        })
 
     return {
         "period": {"from": date_from, "to": date_to},
         "total_revenue": total_revenue,
         "total_orders": total_orders,
+        "billable_orders": billable_orders_count,
+        "average_order_value": average_order_value,
         "orders_by_status": [
-            {"status": k, "label": ORDER_STATUSES.get(k, k), "count": v}
-            for k, v in by_status.items()
+            {"status": status, "label": ORDER_STATUSES.get(status, status), "count": by_status[status]}
+            for status in sorted_statuses
         ],
-        "top_by_revenue": [
-            {"product_id": r.product_id, "name": r.name,
-             "total_qty": r.total_qty, "total_sum": r.total_sum}
-            for r in top_by_revenue
-        ],
-        "top_by_qty": [
-            {"product_id": r.product_id, "name": r.name,
-             "total_qty": r.total_qty, "total_sum": r.total_sum}
-            for r in top_by_qty
-        ],
+        "recent_orders": recent_orders,
     }
 
 

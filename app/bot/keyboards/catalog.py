@@ -45,9 +45,7 @@ def products_kb(products):
 def product_kb(product_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="➖", callback_data=f"cart_dec_{product_id}"),
             InlineKeyboardButton(text="🛒", callback_data=f"cart_add_{product_id}"),
-            InlineKeyboardButton(text="➕", callback_data=f"cart_inc_{product_id}")
         ],
         [
             InlineKeyboardButton(text="⬅️ Назад", callback_data="back")

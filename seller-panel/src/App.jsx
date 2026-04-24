@@ -16,67 +16,74 @@ const NAV = [
   { id: 'settings', label: '⚙️ Настройки' },
 ]
 
+const PAGE_STORAGE_KEY = 'seller_active_page'
+
+function getInitialPage() {
+  const savedPage = localStorage.getItem(PAGE_STORAGE_KEY)
+  return NAV.some(item => item.id === savedPage) ? savedPage : 'products'
+}
+
 export default function App() {
   const [authed, setAuthed]         = useState(false)
   const [authChecked, setChecked]   = useState(false)
   const [adminLogin, setAdminLogin] = useState('')
-  const [page, setPage]             = useState('products')
+  const [page, setPage]             = useState(getInitialPage)
   const [shopName, setShopName]     = useState('Kaza Shop')
   const [statsState, setStatsState] = useState({ dateFrom:'', dateTo:'', stats:[], products:{}, sort:'ordered' })
   const [newOrders, setNewOrders] = useState(0)
 
-  // useEffect(() => {
-  //   const token = localStorage.getItem('admin_token')
-  //   if (!token) { setChecked(true); return }
-  //   api.me().then(d => {
-  //     setAuthed(true); setAdminLogin(d.login)
-  //     return api.getSettings()
-  //   }).then(cfg => {
-  //     setShopName(cfg?.shop_name || 'Kaza Shop')
-  //   }).catch(() => {
-  //     localStorage.removeItem('admin_token')
-  //   }).finally(() => setChecked(true))
-  // }, [])
   useEffect(() => {
-  const token = localStorage.getItem('admin_token')
-  if (!token) {
-    setChecked(true)
-    return
-  }
+    const token = localStorage.getItem('admin_token')
+    if (!token) {
+      setChecked(true)
+      return
+    }
 
-  let t2 // объявляем здесь, чтобы был доступ в cleanup
+    api.me()
+      .then(d => {
+        setAuthed(true)
+        setAdminLogin(d.login)
+        return api.getSettings()
+      })
+      .then(cfg => {
+        setShopName(cfg?.shop_name || 'Kaza Shop')
+      })
+      .catch(() => {
+        localStorage.removeItem('admin_token')
+      })
+      .finally(() => setChecked(true))
+  }, [])
 
-  api.me()
-    .then(d => {
-      setAuthed(true)
-      setAdminLogin(d.login)
-      return api.getSettings()
-    })
-    .then(cfg => {
-      setShopName(cfg?.shop_name || 'Kaza Shop')
+  useEffect(() => {
+    if (!authed) {
+      setNewOrders(0)
+      document.title = 'Kaza Shop'
+      return
+    }
 
-      // 👇 ВСТАВЛЯЕШЬ ЗДЕСЬ
-      const pollOrders = async () => {
-        try {
-          const orders = await api.getOrders('new')
-          setNewOrders(orders.length)
-        } catch {}
-      }
+    let cancelled = false
+    const pollOrders = async () => {
+      try {
+        const orders = await api.getOrders('new')
+        if (!cancelled) setNewOrders(orders.length)
+      } catch {}
+    }
 
-      pollOrders()
-      t2 = setInterval(pollOrders, 30000)
-    })
-    .catch(() => {
-      localStorage.removeItem('admin_token')
-    })
-    .finally(() => setChecked(true))
+    pollOrders()
+    const t = setInterval(pollOrders, 30000)
+    return () => {
+      cancelled = true
+      clearInterval(t)
+    }
+  }, [authed])
 
-  // 👇 cleanup
-  return () => {
-    if (t2) clearInterval(t2)
-  }
+  useEffect(() => {
+    document.title = newOrders > 0 ? `(${newOrders}) Kaza Shop` : 'Kaza Shop'
+  }, [newOrders])
 
-}, [])
+  useEffect(() => {
+    localStorage.setItem(PAGE_STORAGE_KEY, page)
+  }, [page])
 
   function handleLogin(login) {
     setAuthed(true); setAdminLogin(login)
@@ -108,7 +115,12 @@ export default function App() {
             <button key={n.id}
               className={`${s.navBtn} ${page===n.id ? s.active : ''}`}
               onClick={() => setPage(n.id)}
-            >{n.label}</button>
+            >
+              <span className={s.navLabel}>{n.label}</span>
+              {n.orderBadge && newOrders > 0 && (
+                <span className={s.navBadge}>{newOrders}</span>
+              )}
+            </button>
           ))}
         </nav>
         <div className={s.sideFooter}>

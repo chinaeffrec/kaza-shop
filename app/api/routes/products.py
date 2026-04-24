@@ -115,6 +115,7 @@ async def upload_photo(product_id: int, file: UploadFile = File(...), session: A
 
     product.image_file_id = filename
     await session.commit()
+    await _reload_bot_cache()
     return {"status": "ok", "filename": filename, "url": f"/media/{filename}"}
 
 
@@ -127,6 +128,7 @@ async def delete_photo(product_id: int, session: AsyncSession = Depends(get_sess
             path.unlink()
         product.image_file_id = None
         await session.commit()
+        await _reload_bot_cache()
     return {"status": "ok"}
 
 

@@ -10,6 +10,7 @@ export default function StatsPage({ saved, onSave }) {
   const [dateTo, setDateTo]       = useState(saved?.dateTo || '')
   const [loading, setLoading]     = useState(false)
   const [sort, setSort]           = useState(saved?.sort || 'ordered')
+  const [sortDir, setSortDir]     = useState(saved?.sortDir || 'desc')
   const [tab, setTab]             = useState('dashboard')
 
   const load = useCallback(async () => {
@@ -25,25 +26,34 @@ export default function StatsPage({ saved, onSave }) {
       setDashboard(dash)
       setStats(st)
       setProducts(map)
-      onSave?.({ dashboard: dash, stats: st, products: map, dateFrom, dateTo, sort })
+      onSave?.({ dashboard: dash, stats: st, products: map, dateFrom, dateTo, sort, sortDir })
     } catch(e) { alert(e.message) }
     finally { setLoading(false) }
-  }, [dateFrom, dateTo])
+  }, [dateFrom, dateTo, onSave, sort, sortDir])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
 
-  const sorted = [...stats].sort((a,b) => {
-  const av = Number(a[sort]) || 0
-  const bv = Number(b[sort]) || 0
-  return bv - av
-})
+  const sorted = [...stats].sort((a, b) => {
+    const av = Number(a[sort] ?? 0)
+    const bv = Number(b[sort] ?? 0)
+    if (av === bv) return a.product_id - b.product_id
+    return sortDir === 'asc' ? av - bv : bv - av
+  })
+
+  function handleSort(col) {
+    const nextDir = sort === col ? (sortDir === 'desc' ? 'asc' : 'desc') : 'desc'
+    setSort(col)
+    setSortDir(nextDir)
+    onSave?.({ dashboard, stats, products, dateFrom, dateTo, sort: col, sortDir: nextDir })
+  }
 
   const th = (col, label) => (
-      <th className={s.sortable} style={{cursor:'pointer'}} onClick={() => {
-        setSort(col)
-        onSave?.({ dashboard, stats, products, dateFrom, dateTo, sort: col })
-      }}>
-        {label}{sort === col ? ' ▼' : ' ↕'}
+      <th
+        className={s.sortable}
+        style={{cursor:'pointer'}}
+        onClick={() => handleSort(col)}
+      >
+        {label}{sort === col ? (sortDir === 'desc' ? ' ▼' : ' ▲') : ' ↕'}
       </th>
   )
 
@@ -62,7 +72,11 @@ export default function StatsPage({ saved, onSave }) {
         <label className={s.dateLabel}>С <input type="date" className={s.dateInput} value={dateFrom} onChange={e=>setDateFrom(e.target.value)} /></label>
         <label className={s.dateLabel}>По <input type="date" className={s.dateInput} value={dateTo} onChange={e=>setDateTo(e.target.value)} /></label>
         <button className={s.btnApply} onClick={load}>Применить</button>
-        <button className={s.btnReset} onClick={()=>{setDateFrom('');setDateTo('');onSave?.({...saved,dateFrom:'',dateTo:''})}}>Сбросить</button>
+        <button className={s.btnReset} onClick={()=>{
+          setDateFrom('')
+          setDateTo('')
+          onSave?.({ ...saved, dateFrom:'', dateTo:'', sort, sortDir })
+        }}>Сбросить</button>
       </div>
 
       <div className={s.tabs}>
@@ -72,7 +86,6 @@ export default function StatsPage({ saved, onSave }) {
 
       {tab === 'dashboard' && dashboard && (
         <div>
-          {/* Сводные карточки */}
           <div className={s.summary}>
             <div className={s.card}>
               <div className={s.cardVal}>{fmt(dashboard.total_revenue)} ₽</div>
@@ -82,6 +95,14 @@ export default function StatsPage({ saved, onSave }) {
               <div className={s.cardVal}>{dashboard.total_orders}</div>
               <div className={s.cardLabel}>Заказов всего</div>
             </div>
+            <div className={s.card}>
+              <div className={s.cardVal}>{fmt(dashboard.average_order_value)} ₽</div>
+              <div className={s.cardLabel}>Средний чек</div>
+            </div>
+            <div className={s.card}>
+              <div className={s.cardVal}>{dashboard.billable_orders}</div>
+              <div className={s.cardLabel}>Без отмен и возвратов</div>
+            </div>
             {dashboard.orders_by_status.map(st => (
               <div key={st.status} className={s.card}>
                 <div className={s.cardVal}>{st.count}</div>
@@ -90,39 +111,19 @@ export default function StatsPage({ saved, onSave }) {
             ))}
           </div>
 
-          {/* Топ по выручке */}
-          {dashboard.top_by_revenue.length > 0 && (
+          {dashboard.recent_orders?.length > 0 && (
             <div className={s.topSection}>
-              <h2 className={s.sectionTitle}>🏆 Топ по выручке</h2>
+              <h2 className={s.sectionTitle}>🧾 Последние заказы</h2>
               <table className={s.table}>
-                <thead><tr><th>#</th><th>Товар</th><th>Кол-во</th><th>Выручка</th></tr></thead>
+                <thead><tr><th>Заказ</th><th>Покупатель</th><th>Статус</th><th>Сумма</th><th>Дата</th></tr></thead>
                 <tbody>
-                  {dashboard.top_by_revenue.map((r, i) => (
-                    <tr key={r.product_id}>
-                      <td className={s.rank}>{i+1}</td>
-                      <td>{r.name}</td>
-                      <td className={s.num}>{fmt(r.total_qty)}</td>
-                      <td className={s.num}>{fmt(r.total_sum)} ₽</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Топ по количеству */}
-          {dashboard.top_by_qty.length > 0 && (
-            <div className={s.topSection}>
-              <h2 className={s.sectionTitle}>📦 Топ по количеству</h2>
-              <table className={s.table}>
-                <thead><tr><th>#</th><th>Товар</th><th>Кол-во</th><th>Выручка</th></tr></thead>
-                <tbody>
-                  {dashboard.top_by_qty.map((r, i) => (
-                    <tr key={r.product_id}>
-                      <td className={s.rank}>{i+1}</td>
-                      <td>{r.name}</td>
-                      <td className={s.num}>{fmt(r.total_qty)}</td>
-                      <td className={s.num}>{fmt(r.total_sum)} ₽</td>
+                  {dashboard.recent_orders.map(order => (
+                    <tr key={order.id}>
+                      <td>#{order.id}</td>
+                      <td>{order.user_name || `ID ${order.user_id}`}</td>
+                      <td>{order.status_label}</td>
+                      <td className={s.num}>{fmt(order.total)} ₽</td>
+                      <td>{order.created_at ? new Date(order.created_at).toLocaleString('ru-RU') : '—'}</td>
                     </tr>
                   ))}
                 </tbody>

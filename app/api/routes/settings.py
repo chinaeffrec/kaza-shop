@@ -1,11 +1,17 @@
+import os
+import tempfile
 import uuid
+import zipfile
 import aiofiles
+from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
 from typing import Optional
+from starlette.background import BackgroundTask
 
 from app.db.session import get_session
 from app.models.settings import ShopSettings, FaqItem
@@ -13,6 +19,7 @@ from app.models.settings import ShopSettings, FaqItem
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 MEDIA_DIR = Path(__file__).resolve().parents[3] / "media"
+LOGS_DIR = Path(__file__).resolve().parents[2] / "media" / "logs"
 
 
 # ── helpers ──────────────────────────────────────────────
@@ -92,6 +99,32 @@ async def delete_logo(session: AsyncSession = Depends(get_session)):
         s.logo_filename = None
         await session.commit()
     return {"status": "ok"}
+
+
+@router.get("/logs/download")
+async def download_logs():
+    log_files = sorted(
+        [p for p in LOGS_DIR.glob("*.log*") if p.is_file()],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not log_files:
+        raise HTTPException(404, "Логи ещё не созданы")
+
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    temp_file.close()
+
+    with zipfile.ZipFile(temp_file.name, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in log_files:
+            archive.write(path, arcname=path.name)
+
+    filename = f"kaza-shop-logs-{datetime.now().strftime('%Y%m%d-%H%M%S')}.zip"
+    return FileResponse(
+        temp_file.name,
+        media_type="application/zip",
+        filename=filename,
+        background=BackgroundTask(os.unlink, temp_file.name),
+    )
 
 
 def _settings_dict(s: ShopSettings) -> dict:

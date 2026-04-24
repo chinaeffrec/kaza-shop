@@ -21,6 +21,7 @@ export default function SettingsPage({ onSaved, adminLogin }) {
   const [logs, setLogs]         = useState([])
   const [logsOpen, setLogsOpen] = useState(false)
   const [logsLoading, setLogsLoading] = useState(false)
+  const [logsDownloading, setLogsDownloading] = useState(false)
 
   useEffect(() => {
     api.getSettings().then(cfg => {
@@ -129,6 +130,17 @@ export default function SettingsPage({ onSaved, adminLogin }) {
     setLogs(lines); setLogsLoading(false)
   }
 
+  async function downloadLogs() {
+    setLogsDownloading(true)
+    try {
+      await api.downloadLogs()
+    } catch (e) {
+      alert(e.message)
+    } finally {
+      setLogsDownloading(false)
+    }
+  }
+
   return (
     <div className={s.page}>
       <h1 className={s.title}>Настройки</h1>
@@ -224,7 +236,7 @@ export default function SettingsPage({ onSaved, adminLogin }) {
       <section className={s.section}>
         <div className={s.logsHead}>
           <h2 className={s.sectionTitle} style={{margin:0}}>Системный журнал</h2>
-          <div style={{display:'flex',gap:8}}>
+          <div className={s.logsActions}>
             <button className={s.btnRefresh} onClick={loadLogs} disabled={logsLoading}>
               {logsLoading ? 'Проверка...' : '🔍 Проверить состояние'}
             </button>
@@ -236,8 +248,14 @@ export default function SettingsPage({ onSaved, adminLogin }) {
             }}>
               🔄 Сбросить кэш каталога
             </button>
+            <button className={s.btnLogsDownload} onClick={downloadLogs} disabled={logsDownloading}>
+              {logsDownloading ? 'Подготовка...' : '⬇️ Скачать логи'}
+            </button>
           </div>
         </div>
+        <p className={s.logsHint}>
+          Docker автоматически ограничивает размер контейнерных логов. Для выгрузки здесь доступен архив актуальных логов приложения и бота.
+        </p>
         {logsOpen && (
           <div className={s.logsBox}>
             {logs.length===0 ? <span className={s.empty}>Нет данных</span>

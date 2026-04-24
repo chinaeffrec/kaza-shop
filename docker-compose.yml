@@ -1,8 +1,15 @@
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
 
   db:
     image: postgres:15
     restart: always
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
@@ -22,6 +29,7 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: always
+    logging: *default-logging
     ports:
       - "8000:8000"
     volumes:
@@ -44,6 +52,7 @@ services:
       dockerfile: Dockerfile
     container_name: kaza_shop_bot
     restart: always
+    logging: *default-logging
     env_file: .env
     command: python -m app.bot.bot
     volumes:
@@ -61,6 +70,7 @@ services:
       dockerfile: Dockerfile
     container_name: kaza_seller_panel
     restart: always
+    logging: *default-logging
     ports:
       - "5173:5173"
     environment:

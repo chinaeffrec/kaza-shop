@@ -1,13 +1,17 @@
+import logging
+from pathlib import Path
+
 import httpx
 from aiogram.types import (
-    InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton, Message
+    BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton, Message
 )
 
 from app.bot.services.catalog_cache import catalog_cache
 from app.bot.keyboards.catalog import categories_kb, subcategories_kb
 
 BASE_URL = "http://app:8000"
-MEDIA_BASE = "http://app:8000/media"
+MEDIA_DIR = Path(__file__).resolve().parents[2] / "media"
+logger = logging.getLogger(__name__)
 
 
 def _fmt_price(price) -> str:
@@ -37,9 +41,7 @@ def _product_kb(product, idx: int, total: int, products: list) -> InlineKeyboard
     return InlineKeyboardMarkup(inline_keyboard=[
         nav_row,
         [
-            InlineKeyboardButton(text="➖", callback_data=f"cart_dec_{product.id}"),
             InlineKeyboardButton(text="🛒 В корзину", callback_data=f"cart_add_{product.id}"),
-            InlineKeyboardButton(text="➕", callback_data=f"cart_inc_{product.id}"),
         ],
         [
             InlineKeyboardButton(text="⬅️ Назад", callback_data="back"),
@@ -65,45 +67,49 @@ def _product_caption(product) -> str:
 async def _edit_to_text(message: Message, text: str, kb: InlineKeyboardMarkup):
     """Редактирует сообщение в текстовое. Работает и если сообщение с фото."""
     try:
-        # Если сообщение с фото — меняем caption
         if message.photo or message.document:
-            await message.edit_caption(caption=text, reply_markup=kb, parse_mode="HTML")
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            await message.answer(text, reply_markup=kb, parse_mode="HTML")
         else:
             await message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     except Exception:
-        # Fallback если что-то пошло не так
         try:
-            await message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+            await message.answer(text, reply_markup=kb, parse_mode="HTML")
         except Exception:
             pass
 
 
-async def _edit_to_photo(message: Message, photo_url: str, caption: str, kb: InlineKeyboardMarkup):
-    """
-    Показывает фото. Если сообщение уже с фото — edit_media.
-    Если текстовое — edit_media с InputMediaPhoto тоже работает в Telegram,
-    но только если сообщение пришло от бота. Пробуем, при ошибке — текст.
-    """
+async def _send_photo_message(message: Message, photo_path: Path, caption: str, kb: InlineKeyboardMarkup):
+    photo = BufferedInputFile(photo_path.read_bytes(), filename=photo_path.name)
+    await message.answer_photo(
+        photo=photo,
+        caption=caption,
+        reply_markup=kb,
+        parse_mode="HTML",
+    )
+
+
+async def _edit_to_photo(message: Message, photo_path: Path, caption: str, kb: InlineKeyboardMarkup):
+    """Показывает фото товара отдельным сообщением для максимально надёжной доставки."""
+    if not photo_path.exists():
+        logger.warning("Photo not found: %s", photo_path)
+        await _edit_to_text(message, caption, kb)
+        return
+
     try:
-        await message.edit_media(
-            media=InputMediaPhoto(media=photo_url, caption=caption, parse_mode="HTML"),
-            reply_markup=kb,
-        )
-    except Exception as e:
-        err = str(e).lower()
-        # Telegram говорит "there is no media in the message" если сообщение текстовое
-        # В этом случае просто показываем текст с фото-иконкой
-        if "no media" in err or "media" in err or "message_type" in err:
-            # Добавляем иконку что есть фото, показываем как текст
-            text_with_icon = f"🖼 <a href='{photo_url}'>Фото товара</a>\n\n{caption}"
-            try:
-                await message.edit_text(text_with_icon, reply_markup=kb,
-                                        parse_mode="HTML", disable_web_page_preview=False)
-            except Exception:
-                await message.edit_text(caption, reply_markup=kb, parse_mode="HTML")
-        else:
-            # Другая ошибка — просто текст
-            await message.edit_text(caption, reply_markup=kb, parse_mode="HTML")
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        await _send_photo_message(message, photo_path, caption, kb)
+    except Exception:
+        try:
+            await _send_photo_message(message, photo_path, caption, kb)
+        except Exception:
+            await _edit_to_text(message, caption, kb)
 
 
 async def render_product_card(message: Message, product, idx: int, total: int):
@@ -114,8 +120,7 @@ async def render_product_card(message: Message, product, idx: int, total: int):
     caption = _product_caption(product)
 
     if product.image:
-        image_url = f"{MEDIA_BASE}/{product.image}"
-        await _edit_to_photo(message, image_url, caption, kb)
+        await _edit_to_photo(message, MEDIA_DIR / product.image, caption, kb)
     else:
         await _edit_to_text(message, caption, kb)
 

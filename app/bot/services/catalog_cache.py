@@ -1,9 +1,11 @@
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 import httpx
 
 BASE_URL = "http://app:8000"
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -43,13 +45,13 @@ class CatalogCache:
                 async with httpx.AsyncClient(timeout=3) as client:
                     r = await client.get(f"{BASE_URL}/health")
                     if r.status_code == 200:
-                        print("[catalog_cache] App is ready")
+                        logger.info("App is ready")
                         return
             except Exception:
                 pass
-            print(f"[catalog_cache] Waiting for app... ({attempt + 1}/15)")
+            logger.info("Waiting for app... (%s/15)", attempt + 1)
             await asyncio.sleep(2)
-        print("[catalog_cache] Warning: proceeding anyway")
+        logger.warning("Warning: proceeding anyway")
 
     async def load(self):
         await self._wait_for_app()
@@ -60,7 +62,7 @@ class CatalogCache:
                 categories_data = cat_res.json()
 
                 if not isinstance(categories_data, list):
-                    print(f"[catalog_cache] Bad response: {categories_data}")
+                    logger.warning("Bad response: %s", categories_data)
                     return
 
                 for c in categories_data:
@@ -111,10 +113,10 @@ class CatalogCache:
                         subcategories=sub_list,
                     )
 
-            print(f"[catalog_cache] Loaded {len(self.categories)} categories")
+            logger.info("Loaded %s categories", len(self.categories))
 
         except Exception as e:
-            print(f"[catalog_cache] Load failed: {e}")
+            logger.exception("Load failed: %s", e)
 
     def get_categories(self) -> List[Category]:
         return list(self.categories.values())
