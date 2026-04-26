@@ -109,7 +109,7 @@ export default function ProductsPage() {
   async function handleSave() {
     if (!form.name.trim()) return alert('Введите название')
     if (!form.price) return alert('Введите цену')
-    if (!form.subcategory_id) return alert('Выберите подкатегорию')
+    if (!form.subcategory_id) return alert('Выберите категорию и подкатегорию')
 
     setSaving(true)
     try {
