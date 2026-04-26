@@ -119,12 +119,24 @@ async def create_order(data: dict, session: AsyncSession = Depends(get_session))
     await session.flush()
 
     items_text = []
+    stock_warnings = []
     for cart, product in rows:
         session.add(OrderItem(
             order_id=order.id, product_id=product.id,
             name=product.name, price=product.price, quantity=cart.quantity,
         ))
         await _inc_ordered(product.id, cart.quantity, session)
+
+        # Проверяем остаток
+        if product.stock is not None and product.stock < cart.quantity:
+            stock_warnings.append(
+                f"⚠️ {product.name}: заказано {cart.quantity}, в наличии {product.stock}"
+            )
+
+        # Уменьшаем остаток
+        if product.stock is not None:
+            product.stock = max(0, product.stock - cart.quantity)
+
         await session.delete(cart)
         items_text.append(f"• {product.name} × {cart.quantity} = {product.price * cart.quantity} ₽")
 
@@ -152,6 +164,10 @@ async def create_order(data: dict, session: AsyncSession = Depends(get_session))
     )
     admin_contact = await _get_admin_contact(session)
     await _send_telegram(admin_contact, admin_text)
+
+    if stock_warnings:
+        await _send_telegram(admin_contact,
+                             f"⚠️ <b>Нехватка товара в заказе #{order.id}</b>\n\n" + "\n".join(stock_warnings))
 
     return {
         "id": order.id, "user_id": order.user_id,

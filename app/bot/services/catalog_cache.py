@@ -16,7 +16,11 @@ class Product:
     discount_price: Optional[int]
     description: Optional[str]
     characteristics: Optional[str]
-    image: Optional[str]   # имя файла, например product_1_abc.jpg
+    image: Optional[str]          # старое поле (image_file_id)
+    images: list                  # список имён файлов
+    image_url: Optional[str]      # <-- добавляем
+    image_url_2: Optional[str]    # <-- добавляем
+    image_url_3: Optional[str]    # <-- добавляем
     subcategory_id: int
 
 
@@ -94,7 +98,11 @@ class CatalogCache:
                                 discount_price=p.get("discount_price"),
                                 description=p.get("description"),
                                 characteristics=p.get("characteristics"),
-                                image=p.get("image_file_id"),  # имя файла
+                                image=p.get("image_file_id"),
+                                images=p.get("images", []),
+                                image_url=p.get("image_url"),
+                                image_url_2=p.get("image_url_2"),
+                                image_url_3=p.get("image_url_3"),
                                 subcategory_id=s["id"],
                             )
                             for p in (products_data if isinstance(products_data, list) else [])

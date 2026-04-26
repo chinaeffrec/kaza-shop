@@ -10,15 +10,12 @@ from typing import Optional
 
 from app.db.session import get_session
 from app.models.product import Product
-from app.api.schemas.product import ProductCreate, ProductUpdate
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
-# MEDIA_DIR должен совпадать с тем куда монтируется volume в docker-compose
-# ./app/media:/app/app/media  →  файлы лежат в /app/app/media
-# main.py раздаёт StaticFiles из BASE_DIR/"media" = /app/app/media
 MEDIA_DIR = Path(__file__).resolve().parents[2] / "media"
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
 
 async def _reload_bot_cache():
     try:
@@ -27,6 +24,7 @@ async def _reload_bot_cache():
             await client.post("http://bot:8001/reload-cache")
     except Exception:
         pass
+
 
 class ProductCreate(BaseModel):
     subcategory_id: int
@@ -50,9 +48,6 @@ class ProductUpdate(BaseModel):
     subcategory_id: Optional[int] = None
 
 
-
-
-
 @router.post("/", response_model=dict)
 async def create_product(data: ProductCreate, session: AsyncSession = Depends(get_session)):
     product = Product(**data.dict())
@@ -63,10 +58,10 @@ async def create_product(data: ProductCreate, session: AsyncSession = Depends(ge
     return _product_dict(product)
 
 
-
 @router.get("/", response_model=list[dict])
 async def list_products(session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Product))
+    # Сортируем по id — порядок не меняется после редактирования
+    result = await session.execute(select(Product).order_by(Product.id.asc()))
     return [_product_dict(p) for p in result.scalars().all()]
 
 
@@ -89,48 +84,111 @@ async def update_product(product_id: int, data: ProductUpdate, session: AsyncSes
 @router.delete("/{product_id}")
 async def delete_product(product_id: int, session: AsyncSession = Depends(get_session)):
     product = await _get_or_404(product_id, session)
+    # Удаляем все фото
+    for field in ("image_file_id", "image_file_id_2", "image_file_id_3"):
+        fn = getattr(product, field, None)
+        if fn:
+            p = MEDIA_DIR / fn
+            if p.exists():
+                p.unlink()
     await session.delete(product)
     await session.commit()
     await _reload_bot_cache()
     return {"status": "deleted"}
 
 
-@router.post("/{product_id}/photo")
-async def upload_photo(product_id: int, file: UploadFile = File(...), session: AsyncSession = Depends(get_session)):
-    if file.content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(400, f"Unsupported type: {file.content_type}")
-    product = await _get_or_404(product_id, session)
+# ─── Фото (слот 1 — основное, слоты 2 и 3 — дополнительные) ─────────────────
 
-    if product.image_file_id:
-        old = MEDIA_DIR / product.image_file_id
-        if old.exists():
-            old.unlink()
+def _photo_field(slot: int) -> str:
+    """Возвращает имя поля модели для данного слота фото."""
+    if slot == 1:
+        return "image_file_id"
+    return f"image_file_id_{slot}"
+
+
+@router.post("/{product_id}/photo")
+async def upload_photo(
+    product_id: int,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+):
+    """Загрузка основного фото (слот 1)."""
+    return await _upload_slot(product_id, 1, file, session)
+
+
+@router.delete("/{product_id}/photo")
+async def delete_photo(product_id: int, session: AsyncSession = Depends(get_session)):
+    """Удаление основного фото (слот 1)."""
+    return await _delete_slot(product_id, 1, session)
+
+
+@router.post("/{product_id}/photo/{slot}")
+async def upload_photo_slot(
+    product_id: int,
+    slot: int,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+):
+    """Загрузка фото в слот 1, 2 или 3."""
+    if slot not in (1, 2, 3):
+        raise HTTPException(400, "Slot must be 1, 2 or 3")
+    return await _upload_slot(product_id, slot, file, session)
+
+
+@router.delete("/{product_id}/photo/{slot}")
+async def delete_photo_slot(
+    product_id: int,
+    slot: int,
+    session: AsyncSession = Depends(get_session),
+):
+    """Удаление фото из слота 1, 2 или 3."""
+    if slot not in (1, 2, 3):
+        raise HTTPException(400, "Slot must be 1, 2 or 3")
+    return await _delete_slot(product_id, slot, session)
+
+
+async def _upload_slot(product_id: int, slot: int, file: UploadFile, session: AsyncSession):
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(400, f"Unsupported type: {file.content_type}. Use JPEG, PNG or WebP.")
+    product = await _get_or_404(product_id, session)
+    field = _photo_field(slot)
+
+    # Удаляем старый файл если есть
+    old_fn = getattr(product, field, None)
+    if old_fn:
+        old_path = MEDIA_DIR / old_fn
+        if old_path.exists():
+            old_path.unlink()
 
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "jpg"
-    filename = f"product_{product_id}_{uuid.uuid4().hex[:8]}.{ext}"
+    suffix = "" if slot == 1 else f"_s{slot}"
+    filename = f"product_{product_id}{suffix}_{uuid.uuid4().hex[:8]}.{ext}"
     MEDIA_DIR.mkdir(parents=True, exist_ok=True)
     content = await file.read()
     async with aiofiles.open(MEDIA_DIR / filename, "wb") as out:
         await out.write(content)
 
-    product.image_file_id = filename
+    setattr(product, field, filename)
     await session.commit()
     await _reload_bot_cache()
-    return {"status": "ok", "filename": filename, "url": f"/media/{filename}"}
+    return {"status": "ok", "slot": slot, "filename": filename, "url": f"/media/{filename}"}
 
 
-@router.delete("/{product_id}/photo")
-async def delete_photo(product_id: int, session: AsyncSession = Depends(get_session)):
+async def _delete_slot(product_id: int, slot: int, session: AsyncSession):
     product = await _get_or_404(product_id, session)
-    if product.image_file_id:
-        path = MEDIA_DIR / product.image_file_id
+    field = _photo_field(slot)
+    fn = getattr(product, field, None)
+    if fn:
+        path = MEDIA_DIR / fn
         if path.exists():
             path.unlink()
-        product.image_file_id = None
+        setattr(product, field, None)
         await session.commit()
         await _reload_bot_cache()
     return {"status": "ok"}
 
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 
 async def _get_or_404(product_id: int, session: AsyncSession) -> Product:
     result = await session.execute(select(Product).where(Product.id == product_id))
@@ -141,6 +199,14 @@ async def _get_or_404(product_id: int, session: AsyncSession) -> Product:
 
 
 def _product_dict(p: Product) -> dict:
+    # Собираем список всех фото (только непустые)
+    images = [
+        f for f in [
+            p.image_file_id,
+            getattr(p, "image_file_id_2", None),
+            getattr(p, "image_file_id_3", None),
+        ] if f
+    ]
     return {
         "id": p.id,
         "subcategory_id": p.subcategory_id,
@@ -150,7 +216,12 @@ def _product_dict(p: Product) -> dict:
         "description": p.description,
         "characteristics": p.characteristics,
         "image_file_id": p.image_file_id,
+        "image_file_id_2": getattr(p, "image_file_id_2", None),
+        "image_file_id_3": getattr(p, "image_file_id_3", None),
         "image_url": f"/media/{p.image_file_id}" if p.image_file_id else None,
+        "image_url_2": f"/media/{p.image_file_id_2}" if getattr(p, "image_file_id_2", None) else None,
+        "image_url_3": f"/media/{p.image_file_id_3}" if getattr(p, "image_file_id_3", None) else None,
+        "images": images,
         "has_image": bool(p.image_file_id),
         "stock": p.stock,
         "is_active": p.is_active,

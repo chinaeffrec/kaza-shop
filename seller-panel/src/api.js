@@ -63,6 +63,13 @@ async function downloadFile(path, fallbackName) {
   window.URL.revokeObjectURL(url)
 }
 
+// Вспомогательная функция для загрузки файла — использует req (с токеном)
+function uploadFile(path, file) {
+  const fd = new FormData()
+  fd.append('file', file)
+  return req('POST', path, fd, true)
+}
+
 export const api = {
   BASE,
   // Auth
@@ -72,24 +79,20 @@ export const api = {
   // Catalog
   getCategories:    () => req('GET', '/catalog/categories'),
   getSubcategories: (id) => req('GET', `/catalog/categories/${id}/subcategories`),
-  reloadCache:      () => fetch(`${BASE}/catalog/cache/reload`, { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('admin_token')}` } }).then(r => r.json()),
+  reloadCache:      () => req('POST', '/catalog/cache/reload'),
   // Products
-  getProducts:   () => req('GET', '/products/'),
-  getProduct:    (id) => req('GET', `/products/${id}`),
-  createProduct: (d) => req('POST', '/products/', d),
-  updateProduct: (id, d) => req('PATCH', `/products/${id}`, d),
-  deleteProduct: (id) => req('DELETE', `/products/${id}`),
-  uploadPhoto: (id, file) => {
-    const fd = new FormData(); fd.append('file', file)
-    return req('POST', `/products/${id}/photo`, fd, true)
-  },
-  deletePhoto: (id) => req('DELETE', `/products/${id}/photo`),
-  toggleActive: (id, is_active) => req('PATCH', `/products/${id}`, { is_active }),
+  getProducts:      () => req('GET', '/products/'),
+  getProduct:       (id) => req('GET', `/products/${id}`),
+  createProduct:    (d) => req('POST', '/products/', d),
+  updateProduct:    (id, d) => req('PATCH', `/products/${id}`, d),
+  deleteProduct:    (id) => req('DELETE', `/products/${id}`),
+  uploadPhoto:      (id, file) => uploadFile(`/products/${id}/photo`, file),
+  deletePhoto:      (id) => req('DELETE', `/products/${id}/photo`),
+  uploadPhotoSlot:  (id, slot, file) => uploadFile(`/products/${id}/photo/${slot}`, file),
+  deletePhotoSlot:  (id, slot) => req('DELETE', `/products/${id}/photo/${slot}`),
+  toggleActive:     (id, is_active) => req('PATCH', `/products/${id}`, { is_active }),
   // Import
-  importXlsx: (file) => {
-    const fd = new FormData(); fd.append('file', file)
-    return req('POST', '/import/products', fd, true)
-  },
+  importXlsx: (file) => uploadFile('/import/products', file),
   // Orders
   getOrders:        (status) => req('GET', `/orders/${buildQuery({ status })}`),
   getOrder:         (id) => req('GET', `/orders/${id}`),

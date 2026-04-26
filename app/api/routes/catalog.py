@@ -25,13 +25,32 @@ async def get_subcategories(category_id: int, session: AsyncSession = Depends(ge
 
 
 @router.get("/subcategories/{subcategory_id}/products")
-async def get_products(subcategory_id: int, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(
-        select(Product).where(
-            Product.subcategory_id == subcategory_id,
-            Product.is_active == True
+async def get_products(
+    subcategory_id: int,
+    session: AsyncSession = Depends(get_session)
+):
+    hide_oos = False
+    try:
+        from app.models.settings import ShopSettings
+        cfg_res = await session.execute(
+            select(ShopSettings).where(ShopSettings.id == 1)
         )
+        cfg = cfg_res.scalar_one_or_none()
+        if cfg:
+            hide_oos = cfg.hide_out_of_stock or False
+    except Exception:
+        pass
+
+    query = select(Product).where(
+        Product.subcategory_id == subcategory_id,
+        Product.is_active == True
     )
+    if hide_oos:
+        query = query.where(Product.stock > 0)
+
+    result = await session.execute(query)
+    products = result.scalars().all()
+
     return [
         {
             "id": p.id,
@@ -43,8 +62,17 @@ async def get_products(subcategory_id: int, session: AsyncSession = Depends(get_
             "image_file_id": p.image_file_id,
             "image_url": f"/media/{p.image_file_id}" if p.image_file_id else None,
             "stock": p.stock,
+            # images — список ИМЁН ФАЙЛОВ (не URL-путей!)
+            # render_engine строит URL сам: http://app:8000/media/{filename}
+            "images": [
+                x for x in [
+                    p.image_file_id,
+                    getattr(p, "image_file_id_2", None),
+                    getattr(p, "image_file_id_3", None),
+                ] if x
+            ],
         }
-        for p in result.scalars().all()
+        for p in products
     ]
 
 

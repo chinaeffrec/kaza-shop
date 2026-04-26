@@ -21,6 +21,8 @@ class Product(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     characteristics: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_file_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    image_file_id_2: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    image_file_id_3: Mapped[str | None] = mapped_column(String(512), nullable=True)
     stock: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)

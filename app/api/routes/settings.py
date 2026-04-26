@@ -48,6 +48,7 @@ class SettingsUpdate(BaseModel):
     welcome_message: Optional[str] = None
     seller_contact: Optional[str] = None
     admin_contact: Optional[str] = None
+    hide_out_of_stock: Optional[bool] = None
 
 
 @router.patch("/")
@@ -63,6 +64,8 @@ async def update_settings(data: SettingsUpdate, session: AsyncSession = Depends(
         s.seller_contact = data.seller_contact
     if data.admin_contact is not None:
         s.admin_contact = data.admin_contact
+    if data.hide_out_of_stock is not None:
+        s.hide_out_of_stock = data.hide_out_of_stock
     await session.commit()
     return _settings_dict(s)
 
@@ -136,6 +139,7 @@ def _settings_dict(s: ShopSettings) -> dict:
         "welcome_message": s.welcome_message,
         "seller_contact": s.seller_contact,
         "admin_contact": s.admin_contact,
+        "hide_out_of_stock:": s.hide_out_of_stock,
     }
 
 

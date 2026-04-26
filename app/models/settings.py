@@ -20,6 +20,7 @@ class ShopSettings(Base):
     shop_name: Mapped[str] = mapped_column(String(128), default="Kaza Shop")
     logo_filename: Mapped[str | None] = mapped_column(String(256), nullable=True)
     reviews_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    hide_out_of_stock: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class FaqItem(Base):

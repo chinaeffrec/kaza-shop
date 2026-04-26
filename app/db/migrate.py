@@ -34,6 +34,9 @@ MIGRATIONS = [
     "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS welcome_message TEXT",
     "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS seller_contact VARCHAR(256)",
     "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS admin_contact VARCHAR(256)",
+    "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS hide_out_of_stock BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS image_file_id_2 VARCHAR(512)",
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS image_file_id_3 VARCHAR(512)",
 ]
 
 async def run():
