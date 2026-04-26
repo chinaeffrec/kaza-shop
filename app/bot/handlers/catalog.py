@@ -8,7 +8,6 @@ from app.bot.states.screen import Screen
 
 router = Router()
 
-
 @router.callback_query(F.data.startswith("open_"))
 async def open_handler(callback: CallbackQuery):
     user_id = callback.from_user.id
@@ -18,18 +17,23 @@ async def open_handler(callback: CallbackQuery):
 
     if entity == "category":
         screen = Screen(type="subcategories", category_id=entity_id)
+        navigation.push(user_id, screen)
 
     elif entity == "sub":
         screen = Screen(type="products", subcategory_id=entity_id)
+        navigation.push(user_id, screen)
 
     elif entity == "product":
         screen = Screen(type="product", product_id=entity_id)
+        # Не пушим если уже на экране товара — стрелки не должны менять стек
+        current = navigation.peek(user_id)
+        if not (current and current.type == "product"):
+            navigation.push(user_id, screen)
 
     else:
         await callback.answer()
         return
 
-    navigation.push(user_id, screen)
     await render_engine.render(screen, callback.message)
     await callback.answer()
 

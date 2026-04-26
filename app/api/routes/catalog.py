@@ -51,6 +51,8 @@ async def get_products(
     result = await session.execute(query)
     products = result.scalars().all()
 
+    # catalog.py — в списке возвращаемых полей товара добавить:
+
     return [
         {
             "id": p.id,
@@ -61,9 +63,11 @@ async def get_products(
             "characteristics": p.characteristics,
             "image_file_id": p.image_file_id,
             "image_url": f"/media/{p.image_file_id}" if p.image_file_id else None,
+            "image_url_2": f"/media/{getattr(p, 'image_file_id_2', None)}" if getattr(p, "image_file_id_2",
+                                                                                      None) else None,
+            "image_url_3": f"/media/{getattr(p, 'image_file_id_3', None)}" if getattr(p, "image_file_id_3",
+                                                                                      None) else None,
             "stock": p.stock,
-            # images — список ИМЁН ФАЙЛОВ (не URL-путей!)
-            # render_engine строит URL сам: http://app:8000/media/{filename}
             "images": [
                 x for x in [
                     p.image_file_id,
