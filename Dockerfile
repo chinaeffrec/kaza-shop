@@ -1,6 +1,7 @@
 FROM python:3.11-slim
 
 WORKDIR /app
+RUN mkdir -p /app/data && chmod 700 /app/data
 
 # Системные зависимости (curl нужен для healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*

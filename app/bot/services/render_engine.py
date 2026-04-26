@@ -12,7 +12,7 @@ from app.bot.keyboards.catalog import categories_kb, subcategories_kb
 logger = logging.getLogger(__name__)
 
 # Бот и app оба монтируют ./media:/app/media — читаем файлы напрямую
-MEDIA_DIR = Path("/app/media")
+#MEDIA_DIR = Path("/app/media")
 
 
 def _fmt_price(price) -> str:

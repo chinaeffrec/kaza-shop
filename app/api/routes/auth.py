@@ -20,7 +20,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 security = HTTPBearer(auto_error=False)
 
 # Хранилище учётных данных — файл вне кода
-CREDS_FILE = Path("/app/media/.admin_creds.json")
+CREDS_FILE = Path("/app/data/.admin_creds.json")
 SECRET_KEY = os.getenv("SECRET_KEY", "kaza-shop-secret-change-me-in-production-please")
 TOKEN_TTL = 86400  # 24 часа
 
@@ -33,6 +33,10 @@ def _load_creds() -> dict:
             pass
     # Дефолтные данные
     default_pass = os.getenv("ADMIN_PASSWORD", "changeme123!")
+    if os.getenv("ENV") == "production" and default_pass == "changeme123!":
+        import secrets, string
+        default_pass = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
+        print(f"WARNING: ADMIN_PASSWORD not set, generated: {default_pass}")
     return {
         "login": "admin",
         "password_hash": _hash_password(default_pass),
