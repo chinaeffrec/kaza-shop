@@ -13,7 +13,7 @@ from app.models.product import Product
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
-MEDIA_DIR = Path(__file__).resolve().parents[2] / "media"
+MEDIA_DIR = Path("/app/media")
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
@@ -65,9 +65,9 @@ async def list_products(session: AsyncSession = Depends(get_session)):
     return [_product_dict(p) for p in result.scalars().all()]
 
 
-@router.get("/{product_id}", response_model=dict)
-async def get_product(product_id: int, session: AsyncSession = Depends(get_session)):
-    return _product_dict(await _get_or_404(product_id, session))
+# @router.get("/{product_id}", response_model=dict)
+# async def get_product(product_id: int, session: AsyncSession = Depends(get_session)):
+#     return _product_dict(await _get_or_404(product_id, session))
 
 
 @router.patch("/{product_id}", response_model=dict)
@@ -106,20 +106,20 @@ def _photo_field(slot: int) -> str:
     return f"image_file_id_{slot}"
 
 
-@router.post("/{product_id}/photo")
-async def upload_photo(
-    product_id: int,
-    file: UploadFile = File(...),
-    session: AsyncSession = Depends(get_session),
-):
-    """Загрузка основного фото (слот 1)."""
-    return await _upload_slot(product_id, 1, file, session)
+# @router.post("/{product_id}/photo")
+# async def upload_photo(
+#     product_id: int,
+#     file: UploadFile = File(...),
+#     session: AsyncSession = Depends(get_session),
+# ):
+#     """Загрузка основного фото (слот 1)."""
+#     return await _upload_slot(product_id, 1, file, session)
 
 
-@router.delete("/{product_id}/photo")
-async def delete_photo(product_id: int, session: AsyncSession = Depends(get_session)):
-    """Удаление основного фото (слот 1)."""
-    return await _delete_slot(product_id, 1, session)
+# @router.delete("/{product_id}/photo")
+# async def delete_photo(product_id: int, session: AsyncSession = Depends(get_session)):
+#     """Удаление основного фото (слот 1)."""
+#     return await _delete_slot(product_id, 1, session)
 
 
 @router.post("/{product_id}/photo/{slot}")

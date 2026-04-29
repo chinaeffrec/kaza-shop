@@ -37,10 +37,13 @@ def _load_creds() -> dict:
         import secrets, string
         default_pass = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
         print(f"WARNING: ADMIN_PASSWORD not set, generated: {default_pass}")
-    return {
+    creds = {
         "login": "admin",
         "password_hash": _hash_password(default_pass),
     }
+    # Сохраняем чтобы при перезапуске пароль не менялся
+    _save_creds(creds["login"], creds["password_hash"])
+    return creds
 
 
 def _save_creds(login: str, password_hash: str):

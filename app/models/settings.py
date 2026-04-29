@@ -1,4 +1,4 @@
-from sqlalchemy import Text, String, Boolean
+from sqlalchemy import Text, String, Boolean, Column
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
@@ -21,6 +21,11 @@ class ShopSettings(Base):
     logo_filename: Mapped[str | None] = mapped_column(String(256), nullable=True)
     reviews_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     hide_out_of_stock: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    stamp_filename = Column(String, nullable=True)
+    payment_qr_filename = Column(String, nullable=True)
+    payment_qr_comment = Column(String, nullable=True)
+    legal_name = Column(String, nullable=True)
 
 
 class FaqItem(Base):

@@ -28,7 +28,9 @@ async def add_to_cart(data: dict, session: AsyncSession = Depends(get_session)):
     quantity = data.get("quantity", 1)
 
     result = await session.execute(
-        select(Cart).where(Cart.user_id == user_id, Cart.product_id == product_id)
+        select(Cart)
+        .where(Cart.user_id == user_id, Cart.product_id == product_id)
+        .with_for_update()
     )
     cart_item = result.scalar_one_or_none()
     if cart_item:
@@ -64,7 +66,9 @@ async def get_cart(user_id: int, session: AsyncSession = Depends(get_session)):
 @router.post("/inc")
 async def inc_item(data: dict, session: AsyncSession = Depends(get_session)):
     result = await session.execute(
-        select(Cart).where(Cart.user_id == data["user_id"], Cart.product_id == data["product_id"])
+        select(Cart)
+        .where(Cart.user_id == data["user_id"], Cart.product_id == data["product_id"])
+        .with_for_update()
     )
     item = result.scalar_one_or_none()
     if item:
@@ -76,7 +80,9 @@ async def inc_item(data: dict, session: AsyncSession = Depends(get_session)):
 @router.post("/dec")
 async def dec_item(data: dict, session: AsyncSession = Depends(get_session)):
     result = await session.execute(
-        select(Cart).where(Cart.user_id == data["user_id"], Cart.product_id == data["product_id"])
+        select(Cart)
+        .where(Cart.user_id == data["user_id"], Cart.product_id == data["product_id"])
+        .with_for_update()
     )
     item = result.scalar_one_or_none()
     if item:

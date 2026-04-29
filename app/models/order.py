@@ -7,6 +7,7 @@ from app.db.base import Base
 
 ORDER_STATUSES = {
     "new":       "🆕 Новый",
+    "paid": "💳 Оплачен",
     "confirmed": "✅ Подтверждён",
     "assembled": "📦 Собран",
     "shipped":   "🚚 Отправлен",

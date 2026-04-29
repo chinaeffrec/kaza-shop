@@ -1,6 +1,15 @@
 import logging
-import os
 import re
+import os
+import uuid as uuid_mod
+from pathlib import Path as FilePath
+
+import httpx
+from reportlab.lib.pagesizes import A5
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas as pdf_canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -15,6 +24,7 @@ from app.models.settings import ShopSettings
 router = APIRouter(prefix="/orders", tags=["orders"])
 logger = logging.getLogger(__name__)
 
+MEDIA_DIR_RECEIPT = FilePath("/app/media")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_TG_ID = os.getenv("ADMIN_TG_ID")  # Telegram ID администратора для уведомлений
 
@@ -23,6 +33,35 @@ MENU_REPLY_MARKUP = {
         [{"text": "🏠 В меню", "callback_data": "menu_back"}]
     ]
 }
+
+DEJAVU_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+DEJAVU_BOLD_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+if os.path.exists(DEJAVU_PATH):
+    pdfmetrics.registerFont(TTFont('DejaVu', DEJAVU_PATH))
+    pdfmetrics.registerFont(TTFont('DejaVuBold', DEJAVU_BOLD_PATH))
+    FONT_NAME = 'DejaVu'
+    FONT_BOLD = 'DejaVuBold'
+else:
+    FONT_NAME = 'Helvetica'
+    FONT_BOLD = 'Helvetica-Bold'
+
+async def _send_document_telegram(chat_id: int | str, file_path: str, caption: str = ""):
+    """Отправляет PDF-файл через Telegram Bot API."""
+    if not BOT_TOKEN or not chat_id:
+        return False
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            with open(file_path, "rb") as f:
+                response = await client.post(
+                    url,
+                    data={"chat_id": str(chat_id), "caption": caption, "parse_mode": "HTML"},
+                    files={"document": f},
+                )
+            return response.is_success and response.json().get("ok", False)
+    except Exception as e:
+        logger.exception("Telegram send document error: %s", e)
+    return False
 
 async def _send_telegram(chat_id: int | str, text: str, reply_markup: dict | None = None):
     """Отправляет сообщение через Telegram Bot API"""
@@ -99,6 +138,26 @@ async def create_order(data: dict, session: AsyncSession = Depends(get_session))
     comment = data.get("comment", "")
     delivery_address = data.get("delivery_address", "")
 
+    # Авторегистрация / обновление пользователя
+    user_check = await session.execute(select(User).where(User.id == user_id))
+    existing_user = user_check.scalar_one_or_none()
+    if not existing_user:
+        session.add(User(
+            id=user_id,
+            username=data.get("user_username"),
+            first_name=data.get("user_first_name"),
+            last_name=data.get("user_last_name"),
+        ))
+    else:
+        # Обновляем если изменились
+        if data.get("user_username"):
+            existing_user.username = data["user_username"]
+        if data.get("user_first_name"):
+            existing_user.first_name = data["user_first_name"]
+        if data.get("user_last_name"):
+            existing_user.last_name = data["user_last_name"]
+    await session.flush()
+
     result = await session.execute(
         select(Cart, Product).join(Product, Cart.product_id == Product.id)
         .where(Cart.user_id == user_id)
@@ -154,13 +213,13 @@ async def create_order(data: dict, session: AsyncSession = Depends(get_session))
 
     # Уведомление администратору
     admin_text = (
-        f"🆕 <b>Новый заказ #{order.id}</b>\n\n"
-        f"👤 Покупатель: {user_name}\n"
-        f"📞 Контакт: {user_contact}\n\n"
-        f"🛒 Товары:\n" + "\n".join(items_text) + "\n\n"
-        f"💰 <b>Итого: {total} ₽</b>\n"
-        + (f"🏠 Адрес: {delivery_address}\n" if delivery_address else "")
-        + (f"💬 Комментарий: {comment}" if comment else "")
+            f"🆕 <b>Новый заказ #{order.id}</b>\n\n"
+            f"👤 Покупатель: {user_name}\n"
+            f"📞 Контакт: {user_contact}\n\n"
+            f"🛒 Товары:\n" + "\n".join(items_text) + "\n\n"
+                                                     f"💰 <b>Итого: {total} ₽</b>\n"
+            + (f"🏠 Адрес: {delivery_address}\n" if delivery_address else "")
+            + (f"💬 Комментарий: {comment}" if comment else "")
     )
     admin_contact = await _get_admin_contact(session)
     await _send_telegram(admin_contact, admin_text)
@@ -168,13 +227,17 @@ async def create_order(data: dict, session: AsyncSession = Depends(get_session))
     if stock_warnings:
         await _send_telegram(admin_contact,
                              f"⚠️ <b>Нехватка товара в заказе #{order.id}</b>\n\n" + "\n".join(stock_warnings))
+        # Дублируем в комментарий для отображения в админке
+        order.comment = (order.comment + "\n\n" if order.comment else "") + "⚠️ НЕХВАТКА ТОВАРА:\n" + "\n".join(
+            stock_warnings)
+        await session.commit()
+        await session.refresh(order)
 
     return {
         "id": order.id, "user_id": order.user_id,
         "total": order.total, "status": order.status,
         "created_at": order.created_at.isoformat(),
     }
-
 
 @router.get("/")
 async def list_orders(status: str | None = None, session: AsyncSession = Depends(get_session)):
@@ -199,6 +262,144 @@ async def list_orders(status: str | None = None, session: AsyncSession = Depends
         result_list.append(d)
     return result_list
 
+
+@router.post("/{order_id}/receipt")
+async def generate_and_send_receipt(order_id: int, session: AsyncSession = Depends(get_session)):
+    """Генерирует PDF товарного чека и отправляет покупателю."""
+    result = await session.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(404, "Order not found")
+
+    # Получаем состав заказа
+    items_result = await session.execute(
+        select(OrderItem).where(OrderItem.order_id == order_id)
+    )
+    items = items_result.scalars().all()
+
+    # Данные покупателя
+    user_result = await session.execute(select(User).where(User.id == order.user_id))
+    user = user_result.scalar_one_or_none()
+
+    # Настройки магазина
+    settings_result = await session.execute(select(ShopSettings).where(ShopSettings.id == 1))
+    shop = settings_result.scalar_one_or_none()
+
+    shop_name = shop.shop_name if shop else "Kaza Shop"
+    seller_contact = shop.seller_contact if shop else ""
+    legal_name = shop.legal_name if shop else ""
+    stamp_file = shop.stamp_filename if shop else None
+
+    buyer_name = ""
+    if user:
+        buyer_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or f"ID:{order.user_id}"
+
+    # Генерируем PDF
+    receipt_id = uuid_mod.uuid4().hex[:8]
+    filename = f"receipt_{order_id}_{receipt_id}.pdf"
+    filepath = MEDIA_DIR_RECEIPT / filename
+    MEDIA_DIR_RECEIPT.mkdir(parents=True, exist_ok=True)
+
+    c = pdf_canvas.Canvas(str(filepath), pagesize=A5)
+    width, height = A5
+
+    y = height - 15 * mm
+
+    def draw_line(text, font=FONT_NAME, size=10, y_offset=6):
+        nonlocal y
+        c.setFont(font, size)
+        c.drawString(15 * mm, y, text)
+        y -= y_offset * mm
+
+    # Заголовок
+    c.setFont(FONT_BOLD, 14)
+    c.drawString(15 * mm, y, f"{shop_name}")
+    y -= 8 * mm
+    c.setFont(FONT_BOLD, 12)
+    c.drawString(15 * mm, y, f"Товарный чек №{order.id}")
+    y -= 6 * mm
+    c.setFont(FONT_NAME, 9)
+    c.drawString(15 * mm, y, f"Дата: {order.created_at.strftime('%d.%m.%Y %H:%M')}" if order.created_at else f"Дата: —")
+    y -= 5 * mm
+    c.line(15 * mm, y, width - 15 * mm, y)
+    y -= 5 * mm
+
+    # Покупатель
+    c.setFont(FONT_BOLD, 10)
+    c.drawString(15 * mm, y, "Покупатель:")
+    y -= 5 * mm
+    c.setFont(FONT_NAME, 10)
+    c.drawString(15 * mm, y, buyer_name if buyer_name else f"ID: {order.user_id}")
+    if order.delivery_address:
+        y -= 5 * mm
+        c.drawString(15 * mm, y, f"Адрес: {order.delivery_address}")
+    y -= 7 * mm
+
+    # Таблица товаров
+    c.setFont(FONT_BOLD, 9)
+    c.drawString(15 * mm, y, "Товар")
+    c.drawString(85 * mm, y, "Цена")
+    c.drawString(110 * mm, y, "Кол-во")
+    c.drawString(125 * mm, y, "Сумма")
+    y -= 5 * mm
+    c.line(15 * mm, y, width - 15 * mm, y)
+    y -= 3 * mm
+
+    c.setFont(FONT_NAME, 9)
+    for item in items:
+        c.drawString(15 * mm, y, item.name[:40])
+        c.drawString(85 * mm, y, f"{item.price} ₽")
+        c.drawString(110 * mm, y, str(item.quantity))
+        c.drawString(125 * mm, y, f"{item.price * item.quantity} ₽")
+        y -= 5 * mm
+
+    y -= 2 * mm
+    c.line(15 * mm, y, width - 15 * mm, y)
+    y -= 5 * mm
+    c.setFont(FONT_BOLD, 11)
+    c.drawString(15 * mm, y, f"Итого: {order.total} ₽")
+    y -= 5 * mm
+    c.setFont(FONT_NAME, 9)
+    status_label = ORDER_STATUSES.get(order.status, order.status)
+    c.drawString(15 * mm, y, f"Статус: {status_label}")
+    y -= 8 * mm
+
+    # Продавец
+    c.setFont(FONT_BOLD, 9)
+    c.drawString(15 * mm, y, "Продавец:")
+    y -= 5 * mm
+    c.setFont(FONT_NAME, 9)
+    seller_label = shop.legal_name or seller_contact or shop_name or "Kaza Shop"
+    c.drawString(15 * mm, y, seller_label)
+    y -= 8 * mm
+
+    # Печать
+    if stamp_file:
+        stamp_path = MEDIA_DIR_RECEIPT / stamp_file
+        if stamp_path.exists():
+            try:
+                c.drawImage(str(stamp_path), width - 40 * mm, y - 15 * mm, width=25 * mm, height=25 * mm, preserveAspectRatio=True, mask='auto')
+            except Exception:
+                pass
+
+    y -= 12 * mm
+    c.line(15 * mm, y, width - 15 * mm, y)
+    y -= 6 * mm
+    c.setFont(FONT_NAME, 8)
+    c.drawString(15 * mm, y, "Спасибо за покупку!")
+    c.drawRightString(width - 15 * mm, y, f"Чек сформирован: {order.created_at.strftime('%d.%m.%Y') if order.created_at else '—'}")
+
+    c.save()
+
+    # Отправляем покупателю
+    caption = f"🧾 <b>Чек по заказу #{order.id}</b>\nСумма: {order.total} ₽\nСпасибо за покупку!"
+    sent = await _send_document_telegram(order.user_id, str(filepath), caption)
+
+    return {
+        "status": "ok",
+        "receipt_url": f"/media/{filename}",
+        "sent_to_buyer": sent,
+    }
 
 @router.get("/{order_id}")
 async def get_order(order_id: int, session: AsyncSession = Depends(get_session)):

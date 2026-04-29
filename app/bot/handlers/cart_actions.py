@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 import httpx
 
 router = Router()
@@ -13,7 +13,12 @@ async def refresh_cart(callback: CallbackQuery):
 
     from app.bot.handlers.menu import build_cart_text, build_cart_keyboard
     if not data.get("items"):
-        await callback.message.edit_text("Ваша корзина пуста")
+        await callback.message.edit_text(
+            "Ваша корзина пуста",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🏠 В меню", callback_data="menu_back")]
+            ])
+        )
         return
     await callback.message.edit_text(
         build_cart_text(data),

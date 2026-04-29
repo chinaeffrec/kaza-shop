@@ -1,6 +1,6 @@
 import logging
 import httpx
-from pathlib import Path
+# from pathlib import Path
 from aiogram.types import (
     InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton, Message,
     BufferedInputFile
@@ -64,6 +64,66 @@ def _product_kb(product, idx: int, total: int, products: list, photo_idx: int = 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+async def _generate_placeholder_image(product) -> bytes:
+    """Генерирует стилизованную карточку товара без фото."""
+    from PIL import Image, ImageDraw, ImageFont
+    import io
+
+    # Получаем название магазина из настроек
+    shop_title = "Kaza Shop"
+    try:
+        async with httpx.AsyncClient(timeout=2) as client:
+            r = await client.get("http://app:8000/settings/")
+            if r.status_code == 200:
+                shop_title = r.json().get("shop_name", "Kaza Shop")
+    except Exception:
+        pass
+
+    W, H = 500, 400
+    img = Image.new('RGB', (W, H), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+
+    # Рамка
+    draw.rectangle([0, 0, W - 1, H - 1], outline=(220, 220, 230), width=2)
+
+    # Верхняя плашка
+    draw.rectangle([0, 0, W, 60], fill=(108, 99, 255))
+
+    try:
+        font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
+        font_price = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)
+        font_body = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
+    except Exception:
+        font_title = font_price = font_body = ImageFont.load_default()
+
+    # Название магазина в плашке
+    shop_display = shop_title[:30] + ("..." if len(shop_title) > 30 else "")
+    draw.text((20, 15), shop_display, fill=(255, 255, 255), font=font_title)
+
+    # Иконка «нет фото»
+    draw.ellipse([W//2 - 40, 100, W//2 + 40, 180], outline=(200, 200, 210), width=3)
+    draw.line([W//2 - 20, 140, W//2 + 20, 140], fill=(200, 200, 210), width=3)
+    draw.line([W//2, 120, W//2, 160], fill=(200, 200, 210), width=3)
+
+    # Название товара
+    name = product.name[:35] + ("..." if len(product.name) > 35 else "")
+    draw.text((30, 210), name, fill=(40, 40, 60), font=font_title)
+
+    # Цена
+    price_text = f"{product.price:,} ₽".replace(",", " ")
+    bbox = draw.textbbox((0, 0), price_text, font=font_price)
+    price_w = bbox[2] - bbox[0]
+    draw.text((W - price_w - 30, 260), price_text, fill=(108, 99, 255), font=font_price)
+
+    # Описание (если есть)
+    if product.description:
+        desc = product.description[:60] + ("..." if len(product.description or "") > 60 else "")
+        draw.text((30, 310), desc, fill=(150, 150, 160), font=font_body)
+
+    buf = io.BytesIO()
+    img.save(buf, format='JPEG', quality=90)
+    return buf.getvalue()
+
 async def render_product_card(message: Message, product, idx: int, total: int, photo_idx: int = 0):
     sub = catalog_cache.get_subcategory_by_id(product.subcategory_id)
     products = sub.products if sub else [product]
@@ -74,26 +134,32 @@ async def render_product_card(message: Message, product, idx: int, total: int, p
                               getattr(product, "image_url_2", None),
                               getattr(product, "image_url_3", None)] if u]
 
-    if not image_urls:
-        await _safe_edit_text(message, caption, kb)
-        return
-
-    url = image_urls[photo_idx % len(image_urls)]
     photo_content = None
-    filename = "photo.jpg"
-    async with httpx.AsyncClient(timeout=10) as client:
-        try:
-            resp = await client.get(f"http://app:8000{url}")
-            if resp.status_code == 200:
-                photo_content = resp.content
-                filename = url.split("/")[-1]
-        except Exception as e:
-            logger.warning("Failed to download photo %s: %s", url, e)
+    filename = "product.jpg"
 
+    if image_urls:
+        # Есть фото — скачиваем
+        url = image_urls[photo_idx % len(image_urls)]
+        async with httpx.AsyncClient(timeout=10) as client:
+            try:
+                resp = await client.get(f"http://app:8000{url}")
+                if resp.status_code == 200:
+                    photo_content = resp.content
+                    filename = url.split("/")[-1]
+            except Exception as e:
+                logger.warning("Failed to download photo %s: %s", url, e)
+
+    # Нет фото или не удалось скачать — генерируем заглушку
     if not photo_content:
-        await _safe_edit_text(message, caption, kb)
-        return
+        try:
+            photo_content = await _generate_placeholder_image(product)
+            filename = "placeholder.jpg"
+        except Exception as e:
+            logger.warning("Placeholder generation failed: %s", e)
+            await _safe_edit_text(message, caption, kb)
+            return
 
+    # Всегда отправляем как фото-сообщение — чтобы edit_media работал при переходах
     try:
         photo = BufferedInputFile(photo_content, filename=filename)
         if message.photo:
@@ -115,7 +181,6 @@ async def render_product_card(message: Message, product, idx: int, total: int, p
     except Exception as e:
         logger.warning("Photo send error for product %s: %s", product.id, e)
         await _safe_edit_text(message, caption, kb)
-
 
 def _product_caption(product) -> str:
     lines = [f"<b>{product.name}</b>"]
@@ -154,7 +219,16 @@ class RenderEngine:
     async def render(self, screen, message: Message):
 
         if screen.type == "categories":
-            categories = catalog_cache.get_categories()
+            categories = catalog_cache.get_visible_categories()
+            if not categories:
+                await _render_text(
+                    message,
+                    "🗂 <b>Каталог</b>\n\nНет доступных товаров.",
+                    InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="🏠 В меню", callback_data="menu_back")
+                    ]]),
+                )
+                return
             await _render_text(
                 message,
                 "🗂 <b>Каталог</b>\n\nВыберите категорию:",

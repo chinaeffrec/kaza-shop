@@ -89,6 +89,6 @@ async def photo_switch(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data == "noop")
-async def noop(callback: CallbackQuery):
-    await callback.answer()
+# @router.callback_query(F.data == "noop")
+# async def noop(callback: CallbackQuery):
+#     await callback.answer()

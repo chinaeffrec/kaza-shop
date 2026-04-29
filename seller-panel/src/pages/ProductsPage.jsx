@@ -160,8 +160,13 @@ export default function ProductsPage() {
     await load()
   }
 
-  async function handleDeletePhoto(id) {
-    await api.deletePhoto(id).catch(e => alert(e.message))
+  // async function handleDeletePhoto(id) {
+  //   await api.deletePhoto(id).catch(e => alert(e.message))
+  //   await load()
+  // }
+
+  async function handleDeletePhotoSlot(productId, slot) {
+    await api.deletePhotoSlot(productId, slot).catch(e => alert(e.message))
     await load()
   }
 
@@ -251,16 +256,12 @@ export default function ProductsPage() {
                 <td className={s.stockCell}>{p.stock ?? 0}</td>
                 <td>
                   <button className={p.is_active ? s.activeBadge : s.inactiveBadge}
-                    onClick={() => toggleActive(p)} title="Нажмите чтобы переключить">
+                          onClick={() => toggleActive(p)} title="Нажмите чтобы переключить">
                     {p.is_active ? 'Да' : 'Нет'}
                   </button>
                 </td>
                 <td className={s.actions}>
                   <button className={s.btnEdit} onClick={() => openEdit(p)}>✏️</button>
-                  {p.image_url && (
-                    <button className={s.btnDel} onClick={() => handleDeletePhoto(p.id)}
-                      title="Удалить фото">🖼</button>
-                  )}
                   <button className={s.btnDel} onClick={() => handleDelete(p.id)}>🗑</button>
                 </td>
               </tr>
@@ -330,6 +331,7 @@ export default function ProductsPage() {
               const preview = isMain
                 ? photoPreview
                 : extraPreviews[slot] || null
+              const existingUrl = modal?.product?.[isMain ? 'image_url' : `image_url_${slot}`]
 
               return (
                 <label key={slot} className={s.label}>
@@ -340,19 +342,37 @@ export default function ProductsPage() {
                       borderRadius: 8, marginBottom: 6, display: 'block'
                     }} />
                   )}
-                  <input type="file" accept="image/jpeg,image/png,image/webp"
-                    onChange={e => {
-                      const f = e.target.files[0]
-                      if (!f) return
-                      const url = URL.createObjectURL(f)
-                      if (isMain) {
-                        setPhotoFile(f)
-                        setPhotoPreview(url)
-                      } else {
-                        setExtraPhotos(prev => ({ ...prev, [slot]: f }))
-                        setExtraPreviews(prev => ({ ...prev, [slot]: url }))
-                      }
-                    }} />
+                  <div style={{display:'flex', gap:8, alignItems:'center'}}>
+                    <input type="file" accept="image/jpeg,image/png,image/webp"
+                      style={{flex:1}}
+                      onChange={e => {
+                        const f = e.target.files[0]
+                        if (!f) return
+                        const url = URL.createObjectURL(f)
+                        if (isMain) {
+                          setPhotoFile(f)
+                          setPhotoPreview(url)
+                        } else {
+                          setExtraPhotos(prev => ({ ...prev, [slot]: f }))
+                          setExtraPreviews(prev => ({ ...prev, [slot]: url }))
+                        }
+                      }} />
+                    {existingUrl && modal?.type === 'edit' && (
+                      <button type="button" className={s.btnDel}
+                        onClick={async () => {
+                          if (!confirm('Удалить фото?')) return
+                          await api.deletePhotoSlot(modal.product.id, slot)
+                          if (isMain) {
+                            setPhotoPreview(null)
+                            setPhotoFile(null)
+                          } else {
+                            setExtraPreviews(prev => ({ ...prev, [slot]: null }))
+                          }
+                          await load()
+                        }}
+                        title="Удалить фото">🗑</button>
+                    )}
+                  </div>
                 </label>
               )
             })}

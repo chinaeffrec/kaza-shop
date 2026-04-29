@@ -1,6 +1,7 @@
 FROM python:3.11-slim
 
 WORKDIR /app
+RUN apt-get update && apt-get install -y fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /app/data && chmod 700 /app/data
 
 # Системные зависимости (curl нужен для healthcheck)

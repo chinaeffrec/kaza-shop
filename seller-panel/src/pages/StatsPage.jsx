@@ -119,6 +119,14 @@ export default function StatsPage({ saved, onSave }) {
             ))}
           </div>
 
+          <div style={{marginBottom: 12}}>
+            <button className={s.btnApply} style={{background:'#43a047'}}
+              onClick={() => api.exportDashboard(dateFrom, dateTo).catch(e => alert('Ошибка экспорта: ' + e.message))}
+            >
+              📥 Экспорт в Excel
+            </button>
+          </div>
+
           {dashboard.recent_orders?.length > 0 && (
             <div className={s.topSection}>
               <h2 className={s.sectionTitle}>🧾 Последние заказы</h2>
@@ -147,40 +155,49 @@ export default function StatsPage({ saved, onSave }) {
 
       {tab === 'products' && (
         loading ? <p className={s.msg}>Загрузка...</p> : (
-          <table className={s.table}>
-            <thead><tr>
-              <th>Товар</th>
-              {th('added_to_cart','В корзину')}
-              {th('ordered','Заказано')}
-              {th('returned','Возвраты')}
-              {th('period_sold_qty','Продано (период)')}
-              {th('period_sold_sum','Выручка (период)')}
-              <th></th>
-            </tr></thead>
-            <tbody>
-              {sorted.map(st => {
-                const p = products[st.product_id]
-                return (
-                  <tr key={st.product_id}>
-                    <td>{p ? p.name : `ID ${st.product_id}`}</td>
-                    <td className={s.num}>{st.added_to_cart}</td>
-                    <td className={s.num}>{st.ordered}</td>
-                    <td className={`${s.num} ${st.returned>0?s.warn:''}`}>{st.returned}</td>
-                    <td className={s.num}>{st.period_sold_qty||0}</td>
-                    <td className={s.num}>{fmt(st.period_sold_sum||0)} ₽</td>
-                    <td>
-                      <button className={s.btnReturn}
-                        onClick={() => api.trackReturn(st.product_id).then(load)}
-                        title="Зарегистрировать возврат">↩️</button>
-                    </td>
-                  </tr>
-                )
-              })}
-              {sorted.length === 0 && (
-                <tr><td colSpan={7} style={{textAlign:'center',color:'#aaa',padding:20}}>Нет данных</td></tr>
-              )}
-            </tbody>
-          </table>
+          <>
+            <div style={{marginBottom: 12}}>
+              <button className={s.btnApply} style={{background:'#43a047'}}
+                onClick={() => api.exportStats(dateFrom, dateTo).catch(e => alert('Ошибка экспорта: ' + e.message))}
+              >
+                📥 Экспорт в Excel
+              </button>
+            </div>
+            <table className={s.table}>
+              <thead><tr>
+                <th>Товар</th>
+                {th('added_to_cart','В корзину')}
+                {th('ordered','Заказано')}
+                {th('returned','Возвраты')}
+                {th('period_sold_qty','Продано (период)')}
+                {th('period_sold_sum','Выручка (период)')}
+                <th></th>
+              </tr></thead>
+              <tbody>
+                {sorted.map(st => {
+                  const p = products[st.product_id]
+                  return (
+                    <tr key={st.product_id}>
+                      <td>{p ? p.name : `ID ${st.product_id}`}</td>
+                      <td className={s.num}>{st.added_to_cart}</td>
+                      <td className={s.num}>{st.ordered}</td>
+                      <td className={`${s.num} ${st.returned>0?s.warn:''}`}>{st.returned}</td>
+                      <td className={s.num}>{st.period_sold_qty||0}</td>
+                      <td className={s.num}>{fmt(st.period_sold_sum||0)} ₽</td>
+                      <td>
+                        <button className={s.btnReturn}
+                          onClick={() => api.trackReturn(st.product_id).then(load)}
+                          title="Зарегистрировать возврат">↩️</button>
+                      </td>
+                    </tr>
+                  )
+                })}
+                {sorted.length === 0 && (
+                  <tr><td colSpan={7} style={{textAlign:'center',color:'#aaa',padding:20}}>Нет данных</td></tr>
+                )}
+              </tbody>
+            </table>
+          </>
         )
       )}
     </div>

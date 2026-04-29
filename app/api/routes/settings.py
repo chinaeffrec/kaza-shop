@@ -18,7 +18,7 @@ from app.models.settings import ShopSettings, FaqItem
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
-MEDIA_DIR = Path(__file__).resolve().parents[3] / "media"
+MEDIA_DIR = Path("/app/media")
 LOGS_DIR = Path(__file__).resolve().parents[2] / "media" / "logs"
 
 
@@ -49,6 +49,8 @@ class SettingsUpdate(BaseModel):
     seller_contact: Optional[str] = None
     admin_contact: Optional[str] = None
     hide_out_of_stock: Optional[bool] = None
+    payment_qr_comment: Optional[str] = None
+    legal_name: Optional[str] = None
 
 
 @router.patch("/")
@@ -66,6 +68,10 @@ async def update_settings(data: SettingsUpdate, session: AsyncSession = Depends(
         s.admin_contact = data.admin_contact
     if data.hide_out_of_stock is not None:
         s.hide_out_of_stock = data.hide_out_of_stock
+    if data.payment_qr_comment is not None:
+        s.payment_qr_comment = data.payment_qr_comment
+    if data.legal_name is not None:
+        s.legal_name = data.legal_name
     await session.commit()
     return _settings_dict(s)
 
@@ -75,18 +81,15 @@ async def upload_logo(file: UploadFile = File(...), session: AsyncSession = Depe
     if file.content_type not in ("image/jpeg", "image/png", "image/webp", "image/svg+xml"):
         raise HTTPException(400, "Unsupported image type")
     s = await _get_settings(session)
-
     if s.logo_filename:
         old = MEDIA_DIR / s.logo_filename
         if old.exists():
             old.unlink()
-
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "png"
     filename = f"logo_{uuid.uuid4().hex[:8]}.{ext}"
     MEDIA_DIR.mkdir(parents=True, exist_ok=True)
     async with aiofiles.open(MEDIA_DIR / filename, "wb") as f:
-        f.write(await file.read())
-
+        await f.write(await file.read())
     s.logo_filename = filename
     await session.commit()
     return {"logo_url": f"/media/{filename}"}
@@ -104,6 +107,68 @@ async def delete_logo(session: AsyncSession = Depends(get_session)):
     return {"status": "ok"}
 
 
+@router.post("/stamp")
+async def upload_stamp(file: UploadFile = File(...), session: AsyncSession = Depends(get_session)):
+    if file.content_type not in ("image/jpeg", "image/png", "image/webp"):
+        raise HTTPException(400, "Unsupported image type")
+    s = await _get_settings(session)
+    if s.stamp_filename:
+        old = MEDIA_DIR / s.stamp_filename
+        if old.exists():
+            old.unlink()
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "png"
+    filename = f"stamp_{uuid.uuid4().hex[:8]}.{ext}"
+    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    async with aiofiles.open(MEDIA_DIR / filename, "wb") as f:
+        await f.write(await file.read())
+    s.stamp_filename = filename
+    await session.commit()
+    return {"stamp_url": f"/media/{filename}"}
+
+
+@router.delete("/stamp")
+async def delete_stamp(session: AsyncSession = Depends(get_session)):
+    s = await _get_settings(session)
+    if s.stamp_filename:
+        p = MEDIA_DIR / s.stamp_filename
+        if p.exists():
+            p.unlink()
+        s.stamp_filename = None
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.post("/payment-qr")
+async def upload_payment_qr(file: UploadFile = File(...), session: AsyncSession = Depends(get_session)):
+    if file.content_type not in ("image/jpeg", "image/png", "image/webp"):
+        raise HTTPException(400, "Unsupported image type")
+    s = await _get_settings(session)
+    if s.payment_qr_filename:
+        old = MEDIA_DIR / s.payment_qr_filename
+        if old.exists():
+            old.unlink()
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "png"
+    filename = f"payment_qr_{uuid.uuid4().hex[:8]}.{ext}"
+    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    async with aiofiles.open(MEDIA_DIR / filename, "wb") as f:
+        await f.write(await file.read())
+    s.payment_qr_filename = filename
+    await session.commit()
+    return {"payment_qr_url": f"/media/{filename}"}
+
+
+@router.delete("/payment-qr")
+async def delete_payment_qr(session: AsyncSession = Depends(get_session)):
+    s = await _get_settings(session)
+    if s.payment_qr_filename:
+        p = MEDIA_DIR / s.payment_qr_filename
+        if p.exists():
+            p.unlink()
+        s.payment_qr_filename = None
+        await session.commit()
+    return {"status": "ok"}
+
+
 @router.get("/logs/download")
 async def download_logs():
     log_files = sorted(
@@ -113,14 +178,11 @@ async def download_logs():
     )
     if not log_files:
         raise HTTPException(404, "Логи ещё не созданы")
-
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
     temp_file.close()
-
     with zipfile.ZipFile(temp_file.name, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in log_files:
             archive.write(path, arcname=path.name)
-
     filename = f"kaza-shop-logs-{datetime.now().strftime('%Y%m%d-%H%M%S')}.zip"
     return FileResponse(
         temp_file.name,
@@ -139,7 +201,13 @@ def _settings_dict(s: ShopSettings) -> dict:
         "welcome_message": s.welcome_message,
         "seller_contact": s.seller_contact,
         "admin_contact": s.admin_contact,
-        "hide_out_of_stock:": s.hide_out_of_stock,
+        "hide_out_of_stock": s.hide_out_of_stock,
+        "stamp_filename": s.stamp_filename,
+        "stamp_url": f"/media/{s.stamp_filename}" if s.stamp_filename else None,
+        "payment_qr_filename": s.payment_qr_filename,
+        "payment_qr_url": f"/media/{s.payment_qr_filename}" if s.payment_qr_filename else None,
+        "payment_qr_comment": s.payment_qr_comment,
+        "legal_name": s.legal_name,
     }
 
 

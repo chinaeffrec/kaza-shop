@@ -8,6 +8,10 @@ export default function SettingsPage({ onSaved, adminLogin }) {
   const [sellerContact, setSellerContact] = useState('')
   const [adminContact, setAdminContact] = useState('')
   const [saving, setSaving]             = useState(false)
+  const [stampUrl, setStampUrl]         = useState('')
+  const [paymentQrUrl, setPaymentQrUrl] = useState('')
+  const [paymentQrComment, setPaymentQrComment] = useState('')
+  const [legalName, setLegalName]       = useState('')
 
   const [faq, setFaq]         = useState([])
   const [faqForm, setFaqForm] = useState({ question:'', answer:'' })
@@ -29,6 +33,10 @@ export default function SettingsPage({ onSaved, adminLogin }) {
       setWelcomeMsg(cfg.welcome_message || '👋 Добро пожаловать!\n\nВыберите действие:')
       setSellerContact(cfg.seller_contact || '')
       setAdminContact(cfg.admin_contact || '')
+      setStampUrl(cfg.stamp_url || '')
+      setPaymentQrUrl(cfg.payment_qr_url || '')
+      setPaymentQrComment(cfg.payment_qr_comment || '')
+      setLegalName(cfg.legal_name || '')
     }).catch(() => {})
     api.getFaq().then(setFaq).catch(() => {})
   }, [])
@@ -40,7 +48,9 @@ export default function SettingsPage({ onSaved, adminLogin }) {
         shop_name: shopName,
         welcome_message: welcomeMsg,
         seller_contact: sellerContact,
-        admin_contact: adminContact
+        admin_contact: adminContact,
+        payment_qr_comment: paymentQrComment,
+        legal_name: legalName,
       })
       onSaved?.(updated)
       alert('Настройки сохранены')
@@ -169,6 +179,89 @@ export default function SettingsPage({ onSaved, adminLogin }) {
             Узнать свой ID: напишите боту @userinfobot в Telegram
           </span>
         </label>
+
+        <h3 style={{fontSize:14, fontWeight:600, color:'#333', marginTop:20, marginBottom:8}}>
+          🖼 Факсимиле (печать)
+        </h3>
+        <p style={{fontSize:12, color:'#888', marginBottom:8}}>
+          Загрузите изображение печати (будет отображаться в товарном чеке).
+        </p>
+        <input type="file" accept="image/jpeg,image/png,image/webp"
+          onChange={async e => {
+            const f = e.target.files[0]
+            if (!f) return
+            try {
+              const fd = new FormData()
+              fd.append('file', f)
+              const token = localStorage.getItem('admin_token')
+              const res = await fetch(`${api.BASE}/settings/stamp`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}` },
+                body: fd,
+              })
+              if (res.ok) {
+                const data = await res.json()
+                setStampUrl(data.stamp_url)
+                alert('✅ Печать загружена')
+              } else alert('Ошибка загрузки')
+            } catch { alert('Ошибка') }
+          }}
+        />
+        {stampUrl && (
+          <img src={`${api.BASE}${stampUrl}`} alt="Печать"
+            style={{width:80, height:80, objectFit:'contain', marginTop:8, borderRadius:8, border:'1px solid #eee'}} />
+        )}
+
+        <h3 style={{fontSize:14, fontWeight:600, color:'#333', marginTop:20, marginBottom:8}}>
+          📱 QR-код для оплаты
+        </h3>
+        <p style={{fontSize:12, color:'#888', marginBottom:12}}>
+          Сгенерируйте QR в приложении банка («Принять оплату» → QR-код). Загрузите сюда. Покупатель увидит QR после оформления заказа.
+        </p>
+        <label className={s.label}>QR-код (изображение)
+          <input type="file" accept="image/jpeg,image/png,image/webp"
+            onChange={async e => {
+              const f = e.target.files[0]
+              if (!f) return
+              try {
+                const fd = new FormData()
+                fd.append('file', f)
+                const token = localStorage.getItem('admin_token')
+                const res = await fetch(`${api.BASE}/settings/payment-qr`, {
+                  method: 'POST',
+                  headers: { Authorization: `Bearer ${token}` },
+                  body: fd,
+                })
+                if (res.ok) {
+                  const data = await res.json()
+                  setPaymentQrUrl(data.payment_qr_url)
+                  alert('✅ QR-код загружен')
+                } else {
+                  alert('Ошибка загрузки')
+                }
+              } catch { alert('Ошибка') }
+            }}
+          />
+          {paymentQrUrl && (
+            <img src={`${api.BASE}${paymentQrUrl}`} alt="QR"
+              style={{width:200, height:200, objectFit:'contain', marginTop:8, borderRadius:8, border:'2px solid #ccc', background:'#fff'}} />
+          )}
+        </label>
+        <label className={s.label}>Комментарий к оплате
+          <input className={s.input} value={paymentQrComment}
+            onChange={e=>setPaymentQrComment(e.target.value)}
+            placeholder="Отсканируйте QR-код в приложении банка, введите сумму и оплатите" />
+        </label>
+
+        <h3 style={{fontSize:14, fontWeight:600, color:'#333', marginTop:20, marginBottom:8}}>
+          📋 Юридическая информация
+        </h3>
+        <label className={s.label}>Юридическое наименование продавца (для чеков)
+          <input className={s.input} value={legalName}
+            onChange={e=>setLegalName(e.target.value)}
+            placeholder="ИП Иванов Иван Иванович" />
+        </label>
+
         <button className={s.btnSave} onClick={saveSettings} disabled={saving}>
           {saving ? 'Сохранение...' : 'Сохранить настройки'}
         </button>

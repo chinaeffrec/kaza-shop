@@ -63,7 +63,6 @@ async function downloadFile(path, fallbackName) {
   window.URL.revokeObjectURL(url)
 }
 
-// Вспомогательная функция для загрузки файла — использует req (с токеном)
 function uploadFile(path, file) {
   const fd = new FormData()
   fd.append('file', file)
@@ -72,14 +71,17 @@ function uploadFile(path, file) {
 
 export const api = {
   BASE,
+
   // Auth
   login:  (login, password) => req('POST', '/auth/login', { login, password }),
   me:     () => req('GET', '/auth/me'),
   updateCredentials: (d) => req('PATCH', '/auth/credentials', d),
+
   // Catalog
   getCategories:    () => req('GET', '/catalog/categories'),
   getSubcategories: (id) => req('GET', `/catalog/categories/${id}/subcategories`),
   reloadCache:      () => req('POST', '/catalog/cache/reload'),
+
   // Products
   getProducts:      () => req('GET', '/products/'),
   getProduct:       (id) => req('GET', `/products/${id}`),
@@ -91,21 +93,63 @@ export const api = {
   uploadPhotoSlot:  (id, slot, file) => uploadFile(`/products/${id}/photo/${slot}`, file),
   deletePhotoSlot:  (id, slot) => req('DELETE', `/products/${id}/photo/${slot}`),
   toggleActive:     (id, is_active) => req('PATCH', `/products/${id}`, { is_active }),
+
   // Import
   importXlsx: (file) => uploadFile('/import/products', file),
+
   // Orders
   getOrders:        (status) => req('GET', `/orders/${buildQuery({ status })}`),
   getOrder:         (id) => req('GET', `/orders/${id}`),
   getOrderStatuses: () => req('GET', '/orders/statuses'),
   updateOrderStatus:(id, status, comment) => req('PATCH', `/orders/${id}/status`, { status, comment }),
+  generateReceipt:  (id) => req('POST', `/orders/${id}/receipt`),
+
   // Stats
   getDashboard: (from, to) => req('GET', `/stats/dashboard${buildQuery({ date_from: from, date_to: to })}`),
   getStats:     (from, to) => req('GET', `/stats/products${buildQuery({ date_from: from, date_to: to })}`),
   trackReturn:  (pid) => req('POST', `/stats/products/${pid}/return`),
+
+  exportDashboard: (from, to) => {
+    const token = localStorage.getItem('admin_token')
+    const qs = buildQuery({ date_from: from || null, date_to: to || null })
+    const url = `${BASE}/stats/dashboard/export${qs}`
+    return fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then(r => {
+        if (!r.ok) throw new Error('Export failed')
+        return r.blob()
+      })
+      .then(blob => {
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = `stats_orders.xlsx`
+        a.click()
+        URL.revokeObjectURL(a.href)
+      })
+  },
+
+  exportStats: (from, to) => {
+    const token = localStorage.getItem('admin_token')
+    const qs = buildQuery({ date_from: from || null, date_to: to || null })
+    const url = `${BASE}/stats/products/export${qs}`
+    return fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then(r => {
+        if (!r.ok) throw new Error('Export failed')
+        return r.blob()
+      })
+      .then(blob => {
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = `stats_products.xlsx`
+        a.click()
+        URL.revokeObjectURL(a.href)
+      })
+  },
+
   // Settings
   getSettings:    () => req('GET', '/settings/'),
   updateSettings: (d) => req('PATCH', '/settings/', d),
   downloadLogs:   () => downloadFile('/settings/logs/download', 'kaza-shop-logs.zip'),
+
   // FAQ
   getFaq:    () => req('GET', '/faq/'),
   createFaq: (d) => req('POST', '/faq/', d),

@@ -32,8 +32,6 @@ services:
       resources:
         limits:
           memory: 512M
-    environment:
-      - ENV=production
     restart: always
     logging: *default-logging
     ports:
@@ -61,8 +59,6 @@ services:
       resources:
         limits:
           memory: 512M
-    environment:
-      - ENV=production
     restart: always
     logging: *default-logging
     env_file: .env

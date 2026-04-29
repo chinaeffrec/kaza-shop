@@ -42,7 +42,19 @@ export default function OrdersPage() {
     finally { setUpdating(null) }
   }
 
-  const countByStatus = (st) => orders.filter(o => o.status === st).length
+  async function generateReceipt(orderId) {
+    if (!confirm('Сформировать чек и отправить покупателю?')) return
+    try {
+      const res = await api.generateReceipt(orderId)
+      alert(res.sent_to_buyer
+        ? '✅ Чек сформирован и отправлен покупателю'
+        : '⚠️ Чек сформирован, но не отправлен. Проверьте связь с ботом.')
+    } catch(e) {
+      alert('Ошибка: ' + e.message)
+    }
+  }
+
+  // const countByStatus = (st) => orders.filter(o => o.status === st).length
 
   return (
     <div>
@@ -85,6 +97,17 @@ export default function OrdersPage() {
                     {o.user_contact && <div><span className={s.infoLabel}>Контакт:</span> {o.user_contact}</div>}
                     {o.delivery_address && <div><span className={s.infoLabel}>Адрес:</span> {o.delivery_address}</div>}
                     {o.comment && <div><span className={s.infoLabel}>Комментарий:</span> {o.comment}</div>}
+                    <div style={{marginTop: 14}}>
+                      <button
+                          onClick={() => generateReceipt(o.id)}
+                          style={{
+                            background: '#43a047', color: '#fff', padding: '7px 16px',
+                            borderRadius: 8, fontSize: 13, border: 'none', cursor: 'pointer'
+                      }}
+                      >
+                        🧾 Сформировать чек
+                      </button>
+                    </div>
                   </div>
 
                   <h4 className={s.subTitle}>Товары</h4>

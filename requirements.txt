@@ -9,3 +9,5 @@ openpyxl
 python-multipart
 aiofiles
 aiohttp
+reportlab
+qrcode[pil]

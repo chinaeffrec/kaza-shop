@@ -3,6 +3,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from typing import Optional
+from fastapi.responses import StreamingResponse
+from io import BytesIO
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 
 from app.db.session import get_session
 from app.models.product_stats import ProductStats
@@ -108,7 +112,9 @@ async def get_all_stats(
         OrderItem.product_id,
         func.sum(OrderItem.quantity).label("sold_qty"),
         func.sum(OrderItem.price * OrderItem.quantity).label("sold_sum"),
-    ).join(Order, OrderItem.order_id == Order.id).group_by(OrderItem.product_id)
+    ).join(Order, OrderItem.order_id == Order.id).where(
+        Order.status.notin_(["cancelled", "returned"])
+    ).group_by(OrderItem.product_id)
 
     if date_from:
         query = query.where(Order.created_at >= datetime.fromisoformat(date_from))
@@ -135,12 +141,12 @@ async def get_all_stats(
     return result
 
 
-@router.post("/products/{product_id}/cart_add")
-async def track_cart_add(product_id: int, session: AsyncSession = Depends(get_session)):
-    s = await ensure_stats(product_id, session)
-    s.added_to_cart += 1
-    await session.commit()
-    return {"ok": True}
+# @router.post("/products/{product_id}/cart_add")
+# async def track_cart_add(product_id: int, session: AsyncSession = Depends(get_session)):
+#     s = await ensure_stats(product_id, session)
+#     s.added_to_cart += 1
+#     await session.commit()
+#     return {"ok": True}
 
 
 @router.post("/products/{product_id}/return")
@@ -149,3 +155,144 @@ async def track_return(product_id: int, session: AsyncSession = Depends(get_sess
     s.returned += 1
     await session.commit()
     return {"ok": True}
+
+@router.get("/dashboard/export")
+async def export_dashboard(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Экспорт статистики по заказам в Excel."""
+    dashboard = await get_dashboard(date_from, date_to, session)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Статистика заказов"
+
+    # Стили
+    hdr_font = Font(bold=True, color="FFFFFF")
+    hdr_fill = PatternFill(start_color="6C63FF", end_color="6C63FF", fill_type="solid")
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin'),
+    )
+
+    # Заголовок
+    ws.merge_cells('A1:C1')
+    ws['A1'] = f"Статистика заказов • Период: {date_from or '—'} – {date_to or '—'}"
+    ws['A1'].font = Font(bold=True, size=14)
+
+    # Summary
+    ws['A3'] = "Показатель"; ws['B3'] = "Значение"
+    for col in (1, 2):
+        c = ws.cell(row=3, column=col)
+        c.font = hdr_font; c.fill = hdr_fill; c.border = thin_border
+
+    summary = [
+        ("Выручка", f"{dashboard['total_revenue']} ₽"),
+        ("Всего заказов", dashboard['total_orders']),
+        ("Без отмен/возвратов", dashboard['billable_orders']),
+        ("Средний чек", f"{dashboard['average_order_value']} ₽"),
+    ]
+    for i, (label, value) in enumerate(summary):
+        ws.cell(row=4 + i, column=1, value=label).border = thin_border
+        ws.cell(row=4 + i, column=2, value=value).border = thin_border
+
+    # По статусам
+    ws['A10'] = "Статус"; ws['B10'] = "Количество"
+    for col in (1, 2):
+        c = ws.cell(row=10, column=col)
+        c.font = hdr_font; c.fill = hdr_fill; c.border = thin_border
+
+    for i, st in enumerate(dashboard.get('orders_by_status', [])):
+        ws.cell(row=11 + i, column=1, value=st['label']).border = thin_border
+        ws.cell(row=11 + i, column=2, value=st['count']).border = thin_border
+
+    # Последние заказы
+    start = 11 + len(dashboard.get('orders_by_status', [])) + 2
+    ws.cell(row=start, column=1, value="Последние заказы").font = Font(bold=True, size=12)
+    start += 1
+    headers = ["Заказ", "Покупатель", "Статус", "Сумма", "Дата"]
+    for col, h in enumerate(headers, 1):
+        c = ws.cell(row=start, column=col, value=h)
+        c.font = hdr_font; c.fill = hdr_fill; c.border = thin_border
+
+    for i, order in enumerate(dashboard.get('recent_orders', [])):
+        row = start + 1 + i
+        ws.cell(row=row, column=1, value=f"#{order['id']}").border = thin_border
+        ws.cell(row=row, column=2, value=order.get('user_name', '')).border = thin_border
+        ws.cell(row=row, column=3, value=order.get('status_label', '')).border = thin_border
+        ws.cell(row=row, column=4, value=f"{order.get('total', 0)} ₽").border = thin_border
+        ws.cell(row=row, column=5, value=order.get('created_at', '')[:10] if order.get('created_at') else '').border = thin_border
+
+    ws.column_dimensions['A'].width = 18
+    ws.column_dimensions['B'].width = 30
+    ws.column_dimensions['C'].width = 16
+    ws.column_dimensions['D'].width = 14
+    ws.column_dimensions['E'].width = 14
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = f"stats_orders_{date_from or 'all'}_{date_to or 'all'}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/products/export")
+async def export_products_stats(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Экспорт статистики по товарам в Excel."""
+    stats = await get_all_stats(date_from, date_to, session)
+    products_res = await session.execute(select(Product))
+    products_map = {p.id: p.name for p in products_res.scalars().all()}
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Статистика товаров"
+
+    hdr_font = Font(bold=True, color="FFFFFF")
+    hdr_fill = PatternFill(start_color="6C63FF", end_color="6C63FF", fill_type="solid")
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin'),
+    )
+
+    ws.merge_cells('A1:F1')
+    ws['A1'] = f"Статистика по товарам • Период: {date_from or '—'} – {date_to or '—'}"
+    ws['A1'].font = Font(bold=True, size=14)
+
+    headers = ["Товар", "В корзину", "Заказано", "Возвраты", "Продано (период)", "Выручка (период)"]
+    for col, h in enumerate(headers, 1):
+        c = ws.cell(row=3, column=col, value=h)
+        c.font = hdr_font; c.fill = hdr_fill; c.border = thin_border
+
+    for i, item in enumerate(stats):
+        row = 4 + i
+        ws.cell(row=row, column=1, value=products_map.get(item['product_id'], f"ID {item['product_id']}")).border = thin_border
+        ws.cell(row=row, column=2, value=item['added_to_cart']).border = thin_border
+        ws.cell(row=row, column=3, value=item['ordered']).border = thin_border
+        ws.cell(row=row, column=4, value=item['returned']).border = thin_border
+        ws.cell(row=row, column=5, value=item.get('period_sold_qty', 0)).border = thin_border
+        ws.cell(row=row, column=6, value=f"{item.get('period_sold_sum', 0)} ₽").border = thin_border
+
+    for col, width in enumerate([30, 12, 12, 12, 16, 16], 1):
+        ws.column_dimensions[chr(64 + col)].width = width
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = f"stats_products_{date_from or 'all'}_{date_to or 'all'}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )

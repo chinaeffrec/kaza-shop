@@ -129,6 +129,19 @@ class CatalogCache:
     def get_categories(self) -> List[Category]:
         return list(self.categories.values())
 
+    def get_visible_categories(self) -> List[Category]:
+        """Возвращает только категории, в которых есть товары."""
+        result = []
+        for cat in self.categories.values():
+            visible_subs = [s for s in cat.subcategories if s.products]
+            if visible_subs:
+                result.append(Category(
+                    id=cat.id,
+                    name=cat.name,
+                    subcategories=visible_subs,
+                ))
+        return result
+
     def get_category(self, category_id: int) -> Optional[Category]:
         return self.categories.get(category_id)
 

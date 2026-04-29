@@ -8,7 +8,7 @@ from sqlalchemy import text
 from pathlib import Path
 
 import app.models
-import app.db.init_models
+# import app.db.init_models
 
 from app.db.engine import engine
 from app.db.base import Base
@@ -46,9 +46,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-BASE_DIR = Path(__file__).resolve().parent
-MEDIA_DIR = BASE_DIR / "media"
-DATA_DIR = BASE_DIR / "data"
+MEDIA_DIR = Path("/app/media")
+DATA_DIR = Path("/app/data")
 
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
