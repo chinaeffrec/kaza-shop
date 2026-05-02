@@ -92,6 +92,13 @@ async def import_products(file: UploadFile = File(...), session: AsyncSession = 
                 elif str(val).strip().lower() in ("false", "0", "нет", "no"):
                     is_active = False
 
+            stock = 0
+            if "stock" in df.columns and not pd.isna(row.get("stock")):
+                try:
+                    stock = int(float(row["stock"]))
+                except Exception:
+                    stock = 0
+
             # Ищем по имени + подкатегория
             res = await session.execute(
                 select(Product).where(Product.name == name, Product.subcategory_id == subcategory.id)
@@ -104,6 +111,7 @@ async def import_products(file: UploadFile = File(...), session: AsyncSession = 
                 existing.description = description
                 existing.characteristics = characteristics
                 existing.is_active = is_active
+                existing.stock = stock
                 updated += 1
             else:
                 session.add(Product(
@@ -113,6 +121,7 @@ async def import_products(file: UploadFile = File(...), session: AsyncSession = 
                     discount_price=discount_price,
                     description=description,
                     characteristics=characteristics,
+                    stock=stock,
                     is_active=is_active,
                 ))
                 created += 1

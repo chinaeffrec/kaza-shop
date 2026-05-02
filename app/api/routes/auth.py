@@ -16,6 +16,16 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 import re
 
+import smtplib
+from email.mime.text import MIMEText
+# from concurrent.futures import ThreadPoolExecutor
+
+from sqlalchemy import select
+
+from app.db.session import get_session
+
+# _pool = ThreadPoolExecutor(max_workers=2)
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 security = HTTPBearer(auto_error=False)
 
@@ -148,3 +158,36 @@ async def update_credentials(data: CredentialsUpdate, login: str = Depends(requi
     # Возвращаем новый токен
     token = _make_token(data.new_login)
     return {"ok": True, "token": token, "login": data.new_login}
+
+
+def _send_email_sync(to_email: str, subject: str, body: str):
+    smtp_host = os.getenv("SMTP_HOST", "")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user = os.getenv("SMTP_USER", "")
+    smtp_pass = os.getenv("SMTP_PASSWORD", "")
+    smtp_from = os.getenv("SMTP_FROM", smtp_user)
+
+    if not smtp_host or not smtp_user:
+        # Если SMTP не настроен — пишем в логи
+        import logging
+        logging.getLogger(__name__).warning(
+            "SMTP not configured. Recovery email to %s: %s / %s", to_email, subject, body
+        )
+        return False
+
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = smtp_from
+    msg["To"] = to_email
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(smtp_from, [to_email], msg.as_string())
+        return True
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("Email send failed: %s", e)
+        return False
+

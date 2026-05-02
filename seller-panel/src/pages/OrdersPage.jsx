@@ -1,32 +1,42 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api.js'
 import s from './OrdersPage.module.css'
+import { useToast } from '../components/Toast.jsx'
 
 export default function OrdersPage() {
-  const [orders, setOrders]     = useState([])
-  const [statuses, setStatuses] = useState([])
-  const [filter, setFilter]     = useState('')
-  const [loading, setLoading]   = useState(true)
-  const [expanded, setExpanded] = useState(null)
-  const [detail, setDetail]     = useState(null)
-  const [updating, setUpdating] = useState(null)
+  const toast = useToast()
+  const [orders, setOrders]         = useState([])
+  const [ordersPage, setOrdersPage] = useState(1)
+  const [ordersTotal, setOrdersTotal] = useState(0)
+  const [ordersPages, setOrdersPages] = useState(1)
+  const [statuses, setStatuses]     = useState([])
+  const [filter, setFilter]         = useState('')
+  const [loading, setLoading]       = useState(true)
+  const [expanded, setExpanded]     = useState(null)
+  const [detail, setDetail]         = useState(null)
+  const [updating, setUpdating]     = useState(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (pageOverride) => {
+    const page = pageOverride || ordersPage
     setLoading(true)
     try {
-      const [ord, st] = await Promise.all([api.getOrders(filter), api.getOrderStatuses()])
-      setOrders(ord); setStatuses(st)
-    } catch(e) { alert(e.message) }
+      const [ordRes, st] = await Promise.all([api.getOrders(filter, page, 20), api.getOrderStatuses()])
+      setOrders(ordRes.items)
+      setOrdersTotal(ordRes.total)
+      setOrdersPages(ordRes.pages)
+      setOrdersPage(ordRes.page)
+      setStatuses(st)
+    } catch(e) { toast(e.message) }
     finally { setLoading(false) }
-  }, [filter])
+  }, [filter, ordersPage])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { setOrdersPage(1); load(1) }, [filter])
   useEffect(() => {
-  const t = setInterval(() => {
-    load()
-  }, 30000)  // обновляем каждые 30 секунд
-  return () => clearInterval(t)
-}, [load])
+    const t = setInterval(() => {
+      load(ordersPage)
+    }, 30000)
+    return () => clearInterval(t)
+  }, [load, ordersPage])
 
   async function expand(order) {
     if (expanded === order.id) { setExpanded(null); setDetail(null); return }
@@ -38,7 +48,7 @@ export default function OrdersPage() {
   async function changeStatus(orderId, newStatus) {
     setUpdating(orderId)
     try { await api.updateOrderStatus(orderId, newStatus); await load() }
-    catch(e) { alert(e.message) }
+    catch(e) { toast(e.message) }
     finally { setUpdating(null) }
   }
 
@@ -46,26 +56,24 @@ export default function OrdersPage() {
     if (!confirm('Сформировать чек и отправить покупателю?')) return
     try {
       const res = await api.generateReceipt(orderId)
-      alert(res.sent_to_buyer
+      toast(res.sent_to_buyer
         ? '✅ Чек сформирован и отправлен покупателю'
         : '⚠️ Чек сформирован, но не отправлен. Проверьте связь с ботом.')
     } catch(e) {
-      alert('Ошибка: ' + e.message)
+      toast('Ошибка: ' + e.message)
     }
   }
-
-  // const countByStatus = (st) => orders.filter(o => o.status === st).length
 
   return (
     <div>
       <div className={s.toolbar}>
-        <h1 className={s.title}>Заказы <span className={s.count}>{orders.length}</span></h1>
-        <button className={s.refresh} onClick={load}>↻ Обновить</button>
+        <h1 className={s.title}>Заказы <span className={s.count}>{ordersTotal}</span></h1>
+        <button className={s.refresh} onClick={() => load(ordersPage)}>↻ Обновить</button>
       </div>
 
       <div className={s.tabs}>
         <button className={`${s.tab} ${filter===''?s.activeTab:''}`} onClick={()=>setFilter('')}>
-          Все ({orders.length})
+          Все ({ordersTotal})
         </button>
         {statuses.map(st => (
           <button key={st.value}
@@ -75,6 +83,20 @@ export default function OrdersPage() {
           </button>
         ))}
       </div>
+
+      {ordersPages > 1 && (
+        <div style={{display:'flex', gap:8, alignItems:'center', marginBottom:12, fontSize:13, color:'#555'}}>
+          <button onClick={() => load(ordersPage - 1)} disabled={ordersPage <= 1}
+            style={{padding:'4px 12px', borderRadius:6, border:'1px solid #ddd', background:'#fff', cursor:ordersPage<=1?'default':'pointer'}}>
+            ←
+          </button>
+          <span>Стр. {ordersPage} из {ordersPages} (всего {ordersTotal})</span>
+          <button onClick={() => load(ordersPage + 1)} disabled={ordersPage >= ordersPages}
+            style={{padding:'4px 12px', borderRadius:6, border:'1px solid #ddd', background:'#fff', cursor:ordersPage>=ordersPages?'default':'pointer'}}>
+            →
+          </button>
+        </div>
+      )}
 
       {loading ? <p className={s.msg}>Загрузка...</p> : orders.length===0 ? <p className={s.msg}>Заказов нет</p> : (
         <div className={s.list}>

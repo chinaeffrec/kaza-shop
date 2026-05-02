@@ -105,6 +105,18 @@ async def get_all_stats(
     date_to: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
 ):
+    # Получаем количество заказов за период (для расчёта средних)
+    dashboard_orders = 0
+    try:
+        orders_q = select(func.count(Order.id)).where(~Order.status.in_(["cancelled", "returned"]))
+        if date_from:
+            orders_q = orders_q.where(Order.created_at >= datetime.fromisoformat(date_from))
+        if date_to:
+            orders_q = orders_q.where(Order.created_at <= datetime.fromisoformat(date_to + "T23:59:59"))
+        dashboard_orders = (await session.execute(orders_q)).scalar() or 0
+    except Exception:
+        pass
+
     res = await session.execute(select(ProductStats))
     stats = {s.product_id: s for s in res.scalars().all()}
 
@@ -126,19 +138,44 @@ async def get_all_stats(
               for row in period_res.all()}
 
     result = []
+    total_sold_qty = 0
+    total_sold_sum = 0
+    total_returned = 0
     all_pids = set(stats) | set(period)
     for pid in all_pids:
         s = stats.get(pid)
         p = period.get(pid, {})
+        sold_qty = p.get("sold_qty", 0)
+        sold_sum = p.get("sold_sum", 0)
+        returned = s.returned if s else 0
+        total_sold_qty += sold_qty
+        total_sold_sum += sold_sum
+        total_returned += returned
         result.append({
             "product_id": pid,
             "added_to_cart": s.added_to_cart if s else 0,
             "ordered": s.ordered if s else 0,
-            "returned": s.returned if s else 0,
-            "period_sold_qty": p.get("sold_qty", 0),
-            "period_sold_sum": p.get("sold_sum", 0),
+            "returned": returned,
+            "period_sold_qty": sold_qty,
+            "period_sold_sum": sold_sum,
         })
-    return result
+
+    # Подсчитываем количество товаров с ненулевыми продажами
+    products_with_sales = sum(1 for r in result if r["period_sold_qty"] > 0)
+    avg_items_per_order = int(total_sold_qty / dashboard_orders) if dashboard_orders else 0
+    avg_price = int(total_sold_sum / total_sold_qty) if total_sold_qty else 0
+
+    return {
+        "items": result,
+        "summary": {
+            "total_sold_sum": total_sold_sum,
+            "total_sold_qty": total_sold_qty,
+            "avg_items_per_order": avg_items_per_order,
+            "avg_price": avg_price,
+            "total_returned": total_returned,
+            "products_with_sales": products_with_sales,
+        }
+    }
 
 
 # @router.post("/products/{product_id}/cart_add")
@@ -189,10 +226,10 @@ async def export_dashboard(
         c.font = hdr_font; c.fill = hdr_fill; c.border = thin_border
 
     summary = [
-        ("Выручка", f"{dashboard['total_revenue']} ₽"),
+        ("Выручка, ₽", dashboard['total_revenue']),
         ("Всего заказов", dashboard['total_orders']),
         ("Без отмен/возвратов", dashboard['billable_orders']),
-        ("Средний чек", f"{dashboard['average_order_value']} ₽"),
+        ("Средний чек, ₽", dashboard['average_order_value']),
     ]
     for i, (label, value) in enumerate(summary):
         ws.cell(row=4 + i, column=1, value=label).border = thin_border
@@ -212,7 +249,7 @@ async def export_dashboard(
     start = 11 + len(dashboard.get('orders_by_status', [])) + 2
     ws.cell(row=start, column=1, value="Последние заказы").font = Font(bold=True, size=12)
     start += 1
-    headers = ["Заказ", "Покупатель", "Статус", "Сумма", "Дата"]
+    headers = ["Заказ", "Покупатель", "Статус", "Сумма, ₽", "Дата"]
     for col, h in enumerate(headers, 1):
         c = ws.cell(row=start, column=col, value=h)
         c.font = hdr_font; c.fill = hdr_fill; c.border = thin_border
@@ -222,7 +259,8 @@ async def export_dashboard(
         ws.cell(row=row, column=1, value=f"#{order['id']}").border = thin_border
         ws.cell(row=row, column=2, value=order.get('user_name', '')).border = thin_border
         ws.cell(row=row, column=3, value=order.get('status_label', '')).border = thin_border
-        ws.cell(row=row, column=4, value=f"{order.get('total', 0)} ₽").border = thin_border
+        ws.cell(row=row, column=4, value=order.get('total', 0)).border = thin_border
+        ws.cell(row=row, column=4).number_format = '# ##0'
         ws.cell(row=row, column=5, value=order.get('created_at', '')[:10] if order.get('created_at') else '').border = thin_border
 
     ws.column_dimensions['A'].width = 18
@@ -251,6 +289,7 @@ async def export_products_stats(
 ):
     """Экспорт статистики по товарам в Excel."""
     stats = await get_all_stats(date_from, date_to, session)
+    stats = stats["items"] if isinstance(stats, dict) else stats
     products_res = await session.execute(select(Product))
     products_map = {p.id: p.name for p in products_res.scalars().all()}
 
@@ -269,7 +308,7 @@ async def export_products_stats(
     ws['A1'] = f"Статистика по товарам • Период: {date_from or '—'} – {date_to or '—'}"
     ws['A1'].font = Font(bold=True, size=14)
 
-    headers = ["Товар", "В корзину", "Заказано", "Возвраты", "Продано (период)", "Выручка (период)"]
+    headers = ["Товар", "В корзину", "Заказано", "Возвраты", "Продано (период), шт", "Выручка (период), ₽"]
     for col, h in enumerate(headers, 1):
         c = ws.cell(row=3, column=col, value=h)
         c.font = hdr_font; c.fill = hdr_fill; c.border = thin_border
@@ -281,7 +320,9 @@ async def export_products_stats(
         ws.cell(row=row, column=3, value=item['ordered']).border = thin_border
         ws.cell(row=row, column=4, value=item['returned']).border = thin_border
         ws.cell(row=row, column=5, value=item.get('period_sold_qty', 0)).border = thin_border
-        ws.cell(row=row, column=6, value=f"{item.get('period_sold_sum', 0)} ₽").border = thin_border
+        ws.cell(row=row, column=6, value=item.get('period_sold_sum', 0)).border = thin_border
+        for col in range(2, 7):
+            ws.cell(row=row, column=col).number_format = '# ##0'
 
     for col, width in enumerate([30, 12, 12, 12, 16, 16], 1):
         ws.column_dimensions[chr(64 + col)].width = width

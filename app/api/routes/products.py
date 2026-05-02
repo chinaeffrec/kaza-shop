@@ -2,7 +2,7 @@ import uuid
 import aiofiles
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -58,11 +58,28 @@ async def create_product(data: ProductCreate, session: AsyncSession = Depends(ge
     return _product_dict(product)
 
 
-@router.get("/", response_model=list[dict])
-async def list_products(session: AsyncSession = Depends(get_session)):
-    # Сортируем по id — порядок не меняется после редактирования
-    result = await session.execute(select(Product).order_by(Product.id.asc()))
-    return [_product_dict(p) for p in result.scalars().all()]
+@router.get("/", response_model=dict)
+async def list_products(
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=20, ge=1),
+    session: AsyncSession = Depends(get_session),
+):
+    """Возвращает товары с пагинацией. page=1, per_page=20 по умолчанию."""
+    total_result = await session.execute(select(Product))
+    total = len(total_result.scalars().all())
+
+    offset = (page - 1) * per_page
+    result = await session.execute(
+        select(Product).order_by(Product.id.asc()).offset(offset).limit(per_page)
+    )
+    products = [_product_dict(p) for p in result.scalars().all()]
+    return {
+        "items": products,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": max(1, (total + per_page - 1) // per_page),
+    }
 
 
 # @router.get("/{product_id}", response_model=dict)

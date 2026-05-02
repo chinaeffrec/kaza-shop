@@ -1,8 +1,10 @@
 import { useState, useRef } from 'react'
 import { api } from '../api.js'
 import s from './ImportPage.module.css'
+import { useToast } from '../components/Toast.jsx'
 
 export default function ImportPage() {
+  const toast = useToast()
   const [dragging, setDragging] = useState(false)
   const [file, setFile]         = useState(null)
   const [result, setResult]     = useState(null)
@@ -30,7 +32,7 @@ export default function ImportPage() {
       <h1 className={s.title}>Импорт каталога</h1>
       <p className={s.hint}>
         Загрузите .xlsx файл с колонками:{' '}
-        {['category','subcategory','name','price','discount_price','description','characteristics','is_active']
+        {['category','subcategory','name','price','discount_price','description','characteristics', 'stock', 'is_active']
           .map(c => <code key={c}>{c}</code>).reduce((a,b)=>[a,', ',b])}
       </p>
 
@@ -83,17 +85,17 @@ export default function ImportPage() {
           <thead>
             <tr>
               <th>category</th><th>subcategory</th><th>name</th><th>price</th>
-              <th>discount_price</th><th>description</th><th>characteristics</th><th>is_active</th>
+              <th>discount_price</th><th>description</th><th>characteristics</th><th>stock</th><th>is_active</th>
             </tr>
           </thead>
           <tbody>
             <tr>
               <td>Электроника</td><td>Смартфоны</td><td>iPhone 16</td><td>89990</td>
-              <td>79990</td><td>Флагман Apple</td><td>RAM: 8GB</td><td>True</td>
+              <td>79990</td><td>Флагман Apple</td><td>RAM: 8GB</td><td>15</td><td>True</td>
             </tr>
             <tr>
               <td>Напитки</td><td>Соки</td><td>Апельсиновый сок</td><td>120</td>
-              <td></td><td>Свежевыжатый</td><td></td><td>True</td>
+              <td></td><td>Свежевыжатый</td><td></td><td>50</td><td>True</td>
             </tr>
           </tbody>
         </table>

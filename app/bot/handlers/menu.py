@@ -132,10 +132,15 @@ async def open_order_status(callback: CallbackQuery):
         lines = ["📦 <b>Активные заказы</b>\n"] if active else ["📦 Активных заказов нет.\n"]
         for o in active:
             status_label = o.get("status_label", o["status"])
-            lines.append(
-                f"Заказ #{o['id']} — {_fmt_price(o['total'])}\n"
+            order_text = f"📦 Заказ #{o['id']}\n"
+            if o.get("items"):
+                for it in o["items"]:
+                    order_text += f"  • {it['name']} × {it['quantity']} = {_fmt_price(it['sum'])}\n"
+            order_text += (
+                f"💰 <b>Итого: {_fmt_price(o['total'])}</b>\n"
                 f"Статус: <b>{status_label}</b> · {o['created_at'][:10]}"
             )
+            lines.append(order_text)
         text = "\n\n".join(lines)
 
         kb_rows = []
@@ -162,8 +167,13 @@ async def order_history(callback: CallbackQuery):
     else:
         lines = ["📋 <b>История заказов</b>\n"]
         for o in done:
-            lines.append(f"✔️ Заказ #{o['id']} — {_fmt_price(o['total'])} · {o['created_at'][:10]}")
-        text = "\n".join(lines)
+            order_text = f"✔️ Заказ #{o['id']}\n"
+            if o.get("items"):
+                for it in o["items"]:
+                    order_text += f"  • {it['name']} × {it['quantity']} = {_fmt_price(it['sum'])}\n"
+            order_text += f"💰 {_fmt_price(o['total'])} · {o['created_at'][:10]}"
+            lines.append(order_text)
+        text = "\n\n".join(lines)
 
     await _replace_with_text(
         callback.message,
@@ -284,7 +294,12 @@ async def checkout_comment_non_text(message: Message):
 
 @router.message(CheckoutState.waiting_address)
 async def checkout_address_non_text(message: Message):
-    await message.answer("🏠 Адрес доставки нужно отправить текстовым сообщением.")
+    await message.answer(
+        "🏠 Адрес доставки можно отправить только текстом.\nИли нажмите кнопку «Пропустить».",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Пропустить", callback_data="checkout_skip_comment")]
+        ])
+    )
 
 
 async def _finalize_order(message, state: FSMContext, address: str):

@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api.js'
+import { useToast } from '../components/Toast.jsx'
 import s from './SettingsPage.module.css'
 
 export default function SettingsPage({ onSaved, adminLogin }) {
+  const toast = useToast()
   const [shopName, setShopName]         = useState('')
   const [welcomeMsg, setWelcomeMsg]     = useState('')
   const [sellerContact, setSellerContact] = useState('')
@@ -41,20 +43,21 @@ export default function SettingsPage({ onSaved, adminLogin }) {
     api.getFaq().then(setFaq).catch(() => {})
   }, [])
 
-  async function saveSettings() {
+    async function saveSettings() {
     setSaving(true)
     try {
-      const updated = await api.updateSettings({
+      const payload = {
         shop_name: shopName,
         welcome_message: welcomeMsg,
         seller_contact: sellerContact,
         admin_contact: adminContact,
         payment_qr_comment: paymentQrComment,
         legal_name: legalName,
-      })
+      }
+      const updated = await api.updateSettings(payload)
       onSaved?.(updated)
-      alert('Настройки сохранены')
-    } catch(e) { alert(e.message) }
+      toast('Настройки сохранены', 'success')
+    } catch(e) { toast(e.message, 'error') }
     finally { setSaving(false) }
   }
 
@@ -80,7 +83,7 @@ export default function SettingsPage({ onSaved, adminLogin }) {
 
   // FAQ
   async function saveFaq() {
-    if (!faqForm.question.trim() || !faqForm.answer.trim()) return alert('Заполните вопрос и ответ')
+    if (!faqForm.question.trim() || !faqForm.answer.trim()) return toast('Заполните вопрос и ответ', 'error')
     try {
       if (editFaqId) {
         const upd = await api.updateFaq(editFaqId, faqForm)
@@ -90,7 +93,7 @@ export default function SettingsPage({ onSaved, adminLogin }) {
         setFaq(f => [...f, created])
       }
       setFaqForm({ question:'', answer:'' }); setEditFaqId(null)
-    } catch(e) { alert(e.message) }
+    } catch(e) { toast(e.message, 'error') }
   }
 
   async function onDrop(targetIdx) {
@@ -105,12 +108,12 @@ export default function SettingsPage({ onSaved, adminLogin }) {
 
   async function deleteFaq(id) {
     if (!confirm('Удалить вопрос?')) return
-    await api.deleteFaq(id).catch(e => alert(e.message))
+    await api.deleteFaq(id).catch(e => toast(e.message, 'error'))
     setFaq(f => f.filter(i => i.id !== id))
   }
 
   async function toggleFaqActive(item) {
-    const upd = await api.updateFaq(item.id, { is_active: !item.is_active }).catch(e => { alert(e.message); return null })
+    const upd = await api.updateFaq(item.id, { is_active: !item.is_active }).catch(e => { toast(e.message, 'error'); return null })
     if (upd) setFaq(f => f.map(i => i.id === item.id ? upd : i))
   }
 
@@ -127,14 +130,16 @@ export default function SettingsPage({ onSaved, adminLogin }) {
       lines.push(`[${ts()}] 🗄 База данных: ${db.db==='ok'?'✅ подключена':'❌ ' + db.detail}`)
     } catch { lines.push(`[${ts()}] 🗄 База данных: ⚠️ нет ответа`) }
     try {
-      const orders = await api.getOrders()
+      const ordersRes = await api.getOrders('', 1, 10000)
+      const orders = ordersRes.items || ordersRes
       const byStatus = orders.reduce((a,o)=>{ a[o.status]=(a[o.status]||0)+1; return a },{})
       lines.push(`[${ts()}] 🧾 Заказов: ${orders.length} — ${Object.entries(byStatus).map(([k,v])=>`${k}:${v}`).join(', ')||'нет'}`)
     } catch { lines.push(`[${ts()}] 🧾 Заказы: ⚠️ ошибка`) }
     try {
       const prods = await api.getProducts()
-      const noPhoto = prods.filter(p=>!p.has_image).length
-      lines.push(`[${ts()}] 📦 Товаров: ${prods.length}, без фото: ${noPhoto}`)
+      const prodItems = prods.items || prods
+      const noPhoto = prodItems.filter(p=>!p.has_image).length
+      lines.push(`[${ts()}] 📦 Товаров: ${prodItems.length}, без фото: ${noPhoto}`)
     } catch { lines.push(`[${ts()}] 📦 Товары: ⚠️ ошибка`) }
     lines.push(`[${ts()}] 🕐 Проверено: ${new Date().toLocaleString()}`)
     setLogs(lines); setLogsLoading(false)
@@ -145,7 +150,7 @@ export default function SettingsPage({ onSaved, adminLogin }) {
     try {
       await api.downloadLogs()
     } catch (e) {
-      alert(e.message)
+      toast(e.message, 'error')
     } finally {
       setLogsDownloading(false)
     }
@@ -202,9 +207,9 @@ export default function SettingsPage({ onSaved, adminLogin }) {
               if (res.ok) {
                 const data = await res.json()
                 setStampUrl(data.stamp_url)
-                alert('✅ Печать загружена')
-              } else alert('Ошибка загрузки')
-            } catch { alert('Ошибка') }
+                toast('Печать загружена', 'success')
+              } else toast('Ошибка загрузки', 'error')
+            } catch { toast('Ошибка', 'error') }
           }}
         />
         {stampUrl && (
@@ -235,11 +240,11 @@ export default function SettingsPage({ onSaved, adminLogin }) {
                 if (res.ok) {
                   const data = await res.json()
                   setPaymentQrUrl(data.payment_qr_url)
-                  alert('✅ QR-код загружен')
+                  toast('QR-код загружен', 'success')
                 } else {
-                  alert('Ошибка загрузки')
+                  toast('Ошибка загрузки', 'error')
                 }
-              } catch { alert('Ошибка') }
+              } catch { toast('Ошибка', 'error') }
             }}
           />
           {paymentQrUrl && (
@@ -257,9 +262,9 @@ export default function SettingsPage({ onSaved, adminLogin }) {
           📋 Юридическая информация
         </h3>
         <label className={s.label}>Юридическое наименование продавца (для чеков)
-          <input className={s.input} value={legalName}
-            onChange={e=>setLegalName(e.target.value)}
-            placeholder="ИП Иванов Иван Иванович" />
+          <textarea className={s.input} rows={4} value={legalName}
+                    onChange={e=>setLegalName(e.target.value)}
+                    placeholder={"ИП Иванов Иван Иванович\nИНН 1234567890\nОГРНИП 123456789012345\nАдрес: г. Москва, ул. Примерная, д. 1"} />
         </label>
 
         <button className={s.btnSave} onClick={saveSettings} disabled={saving}>
@@ -270,6 +275,10 @@ export default function SettingsPage({ onSaved, adminLogin }) {
       {/* FAQ */}
       <section className={s.section}>
         <h2 className={s.sectionTitle}>FAQ для бота</h2>
+        <div style={{position:'absolute',opacity:0,height:0,overflow:'hidden'}}>
+          <input type="text" name="fake_username" autoComplete="username" tabIndex="-1" />
+          <input type="password" name="fake_password" autoComplete="current-password" tabIndex="-1" />
+        </div>
         <div className={s.faqForm}>
           <input className={s.input} placeholder="Вопрос" value={faqForm.question}
             onChange={e=>setFaqForm(f=>({...f,question:e.target.value}))} />
@@ -306,6 +315,10 @@ export default function SettingsPage({ onSaved, adminLogin }) {
       <section className={s.section}>
         <h2 className={s.sectionTitle}>Безопасность</h2>
         <p className={s.hint}>Текущий логин: <b>{adminLogin}</b></p>
+        <div style={{position:'absolute',opacity:0,height:0,overflow:'hidden'}}>
+          <input type="text" name="fake_username2" autoComplete="username" tabIndex="-1" />
+          <input type="password" name="fake_password2" autoComplete="current-password" tabIndex="-1" />
+        </div>
         <label className={s.label}>Текущий пароль
           <input type="password" className={s.input} value={pwForm.current_password}
             onChange={e=>setPwForm(f=>({...f,current_password:e.target.value}))} autoComplete="current-password" />
@@ -336,8 +349,8 @@ export default function SettingsPage({ onSaved, adminLogin }) {
             <button className={s.btnCacheReset} onClick={async()=>{
               try {
                 const r = await api.reloadCache()
-                alert(r.message || 'Кэш перезагружен')
-              } catch { alert('Ошибка сброса кэша') }
+                toast(r.message || 'Кэш перезагружен', 'success')
+              } catch { toast('Ошибка сброса кэша', 'error') }
             }}>
               🔄 Сбросить кэш каталога
             </button>

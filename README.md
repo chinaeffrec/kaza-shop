@@ -1,119 +1,144 @@
-# Kaza Shop — руководство по развёртыванию и эксплуатации
+# Kaza Shop — инструкция по развертыванию и эксплуатации
 
-## 1. Описание проекта
+Эта инструкция рассчитана на самостоятельный запуск сервиса на Ubuntu VPS.
 
-Kaza Shop — интернет-магазин с Telegram-ботом для покупателей и веб-панелью для администратора. Четыре Docker-сервиса: PostgreSQL, FastAPI-бэкенд, Telegram-бот (aiogram), React SPA (Vite).
+## 1. Системные требования
 
-**Ключевые возможности:**
-- Админка (React): управление товарами (до 3 фото), категориями/подкатегориями, заказами, FAQ, импорт из Excel, статистика, настройки
-- Telegram-бот: каталог с галереей фото, корзина, оформление заказа с реквизитами СБП, уведомления о статусе, очистка чата
-- PDF-чеки с факсимиле, отправляемые покупателю в бот
-- JWT-авторизация администратора, смена логина/пароля
+| Компонент | Минимально | Рекомендуется |
+|---|---:|---:|
+| ОС | Ubuntu 22.04/24.04 | Ubuntu 24.04 LTS |
+| RAM | 1 GB | 2 GB |
+| Диск | 10 GB | 20 GB SSD |
+| Docker | 24+ | последняя стабильная |
+| Docker Compose | v2 | v2 |
+| Домен | не обязателен | обязательно (HTTPS) |
+| VPS | вне РФ | Европа (DE/NL/SE) |
 
----
+## 2. Важно про размещение VPS
 
-## 2. Быстрый старт (локально)
+Telegram API (`api.telegram.org`) может быть недоступен из РФ. Для стабильной работы бота размещайте сервер за пределами РФ.
 
-### 2.1 Требования
+## 3. Подготовка сервера
 
-- Docker 24+ и Docker Compose v2
-- Свободные порты: `5432`, `8000`, `5173`
-- Telegram Bot Token (получить у [@BotFather](https://t.me/BotFather))
-
-### 2.2 Подготовка
+Выполняйте команды от `root` (или через `sudo`).
 
 ```bash
-git clone <repo-url> kaza_shop
-cd kaza_shop
-
-# Создать .env (локальная разработка)
-cat > .env << 'EOF'
-DB_USER=kaza_admin
-DB_PASSWORD=devpassword123
-DB_NAME=kaza_shop
-SECRET_KEY=dev-secret-key-not-for-production
-ADMIN_PASSWORD=changeme123!
-BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
-ADMIN_TG_ID=123456789
-PAYMENT_PROVIDER_TOKEN=
-EOF
-
-# Создать пустые директории
-mkdir -p media data
-```
-### 2.3 Запуск
-
-docker compose build --no-cache
-docker compose up -d
-
-### 2.4 Проверка работоспособности
-
-curl http://localhost:8000/health          # → {"status":"ok"}
-open http://localhost:5173                  # страница логина
-
-bash
-
-docker compose down          # контейнеры остановлены, данные сохранены
-docker compose down -v       # ⚠️ полное удаление БД и медиа
-
-## 3. Деплой на VPS
-### 3.1 Подготовка сервера (Ubuntu 22.04 / 24.04)
-bash
-
-ssh root@<vps-ip>
-
 apt update && apt upgrade -y
-apt install -y docker.io docker-compose-v2 curl
+apt install -y docker.io docker-compose-v2 curl rsync ufw nginx certbot python3-certbot-nginx
 
 systemctl enable docker
 systemctl start docker
 
 mkdir -p /opt/kaza-shop/media /opt/kaza-shop/data
 cd /opt/kaza-shop
-
-### 3.2 Файл .env для продакшена
-bash
 ```
-cat > /opt/kaza-shop/.env << 'EOF'
+
+## 4. Базовая защита сервера (обязательно)
+
+Откройте только нужные порты:
+
+```bash
+ufw allow OpenSSH
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw enable
+ufw status
+```
+
+Ожидаемо открыты только `22`, `80`, `443`.
+
+## 5. Переменные окружения (`.env`)
+
+Создайте файл:
+
+```bash
+nano /opt/kaza-shop/.env
+```
+
+Пример:
+
+```env
 DB_USER=kaza_prod
-DB_PASSWORD=$(openssl rand -base64 24)
+DB_PASSWORD=CHANGE_ME_STRONG_DB_PASSWORD
 DB_NAME=kaza_shop
-SECRET_KEY=$(openssl rand -base64 48)
-ADMIN_PASSWORD=$(openssl rand -base64 16)
-BOT_TOKEN=<реальный токен от BotFather>
-ADMIN_TG_ID=<числовой Telegram ID админа>
+SECRET_KEY=CHANGE_ME_LONG_RANDOM_SECRET_KEY
+ADMIN_PASSWORD=CHANGE_ME_STRONG_ADMIN_PASSWORD
+BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
+ADMIN_TG_ID=123456789
 DOMAIN=shop.example.com
 CORS_ORIGINS=https://shop.example.com
-EOF
 ```
-Отредактировать .env — заменить <...> реальными значениями и записать пароли отдельно.
-### 3.3 Перенос кода на сервер
 
-С локальной машины:
-bash
+Сгенерировать стойкие значения:
+
+```bash
+openssl rand -base64 24   # DB_PASSWORD
+openssl rand -base64 48   # SECRET_KEY
+openssl rand -base64 16   # ADMIN_PASSWORD
 ```
-rsync -av --exclude='.git' --exclude='*.log' --exclude='__pycache__' \
-      --exclude='*.pyc' --exclude='.env' --exclude='media/*' \
-      ./ user@<vps-ip>:/opt/kaza-shop/
+
+Ограничьте доступ к `.env`:
+
+```bash
+chmod 600 /opt/kaza-shop/.env
 ```
-### 3.4 Запуск
-bash
+
+## 6. Как получить BOT_TOKEN и ADMIN_TG_ID
+
+- `BOT_TOKEN`: в Telegram через `@BotFather` -> `/newbot`.
+- `ADMIN_TG_ID`: в Telegram через `@userinfobot` (числовой ID).
+
+## 7. Загрузка проекта на сервер
+
+С локальной машины (из папки проекта):
+
+```bash
+rsync -av --delete \
+  --exclude='.git' --exclude='.idea' --exclude='.venv' \
+  --exclude='*.log' --exclude='__pycache__' --exclude='*.pyc' \
+  --exclude='.env' --exclude='media/*' --exclude='data/*' \
+  ./ user@vps-ip:/opt/kaza-shop/
 ```
-ssh user@<vps-ip>
+
+## 8. Первый запуск
+
+```bash
+ssh user@vps-ip
 cd /opt/kaza-shop
+
 docker compose -f docker-compose.prod.yml build --no-cache
 docker compose -f docker-compose.prod.yml up -d
 ```
-### 3.5 Nginx reverse proxy + HTTPS
-bash
+
+Проверка:
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+curl http://localhost:8000/health
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:5173
 ```
-apt install -y nginx certbot python3-certbot-nginx
+
+Ожидаемо:
+- контейнеры `Up` (и `healthy`, если healthcheck задан);
+- `/health` возвращает `{"status":"ok"}`;
+- порт админки отдает `200`.
+
+Вход в админку: `http://<SERVER_IP>:5173`, логин `admin`, пароль из `ADMIN_PASSWORD`.
+
+## 9. Домен и HTTPS через Nginx (рекомендуется)
+
+Создайте конфиг:
+
+```bash
+nano /etc/nginx/sites-available/kaza-shop
 ```
-```
-cat > /etc/nginx/sites-available/kaza-shop << 'NGINX'
+
+```nginx
 server {
     listen 80;
     server_name shop.example.com;
+
+    client_max_body_size 20M;
 
     location / {
         proxy_pass http://127.0.0.1:5173;
@@ -128,216 +153,208 @@ server {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
     }
-
-    client_max_body_size 20M;
 }
 ```
-NGINX
-```
-ln -s /etc/nginx/sites-available/kaza-shop /etc/nginx/sites-enabled/
+
+Активируйте:
+
+```bash
+ln -sf /etc/nginx/sites-available/kaza-shop /etc/nginx/sites-enabled/kaza-shop
 nginx -t && systemctl reload nginx
 certbot --nginx -d shop.example.com
 ```
-### 3.6 Проверка
 
-    https://shop.example.com/health → {"status":"ok"}
+Проверка:
 
-    https://shop.example.com → страница логина в админку
-
-    Бот в Telegram → /start → главное меню
-
-## 4. Архитектура данных (где что хранится)
-Данные	Где	Сохраняются при docker compose down
-Товары, категории, подкатегории	PostgreSQL	✅ named volume postgres_data
-Заказы, корзины, пользователи	PostgreSQL	✅
-FAQ, настройки магазина	PostgreSQL	✅
-Фото товаров	./media/ (bind mount)	✅
-Факсимиле (печать)	./media/	✅
-Логи приложения и бота	./media/logs/	✅
-Учётные данные админа	./data/.admin_creds.json (bind mount)	✅
-PDF-чеки	./media/	✅
-
-Важно: docker compose down сохраняет все данные. Никогда не выполнять docker compose down -v на продакшене — это удалит том postgres_data и очистит базу данных.
-## 5. Резервное копирование
-### 5.1 Автоматический скрипт (daily cron)
-bash
+```bash
+curl -I https://shop.example.com
+curl https://shop.example.com/health
 ```
-cat > /opt/kaza-shop/backup.sh << 'BACKUP'
+
+## 10. Smoke-тест после запуска (обязательно)
+
+1. Открыть админку, авторизоваться.
+2. Проверить вкладки: `Товары`, `Заказы`, `Статистика`, `Настройки`.
+3. Создать тестовый товар (или импортировать 1-2 позиции).
+4. Проверить, что бот отвечает на `/start`.
+5. Оформить тестовый заказ и убедиться, что:
+   - заказ появился в админке;
+   - админу пришло уведомление;
+   - (если настроено) чек формируется.
+6. Проверить экспорт Excel в статистике.
+
+## 11. Где хранятся данные
+
+| Данные | Где хранятся | Сохраняются при пересборке |
+|---|---|---|
+| Товары, категории, заказы, настройки | PostgreSQL volume | Да |
+| Фото товаров, QR, печать, чеки | `/opt/kaza-shop/media/` | Да |
+| Креды админа | `/opt/kaza-shop/data/` | Да |
+| Секреты | `/opt/kaza-shop/.env` | Да |
+
+## 12. Резервное копирование
+
+Создайте скрипт:
+
+```bash
+nano /opt/kaza-shop/backup.sh
+```
+
+```bash
 #!/bin/bash
+set -euo pipefail
+
 BACKUP_DIR=/opt/backups/kaza-shop
-mkdir -p $BACKUP_DIR
+PROJECT_DIR=/opt/kaza-shop
+mkdir -p "$BACKUP_DIR"
 DATE=$(date +%Y%m%d_%H%M%S)
-```
-# Дамп БД
-docker compose -f /opt/kaza-shop/docker-compose.prod.yml exec -T db \
-  pg_dump -U kaza_prod kaza_shop > $BACKUP_DIR/db_$DATE.sql
 
-# Медиа-файлы
-tar -czf $BACKUP_DIR/media_$DATE.tar.gz /opt/kaza-shop/media/
+# База данных
+docker compose -f "$PROJECT_DIR/docker-compose.prod.yml" exec -T db \
+  pg_dump -U kaza_prod kaza_shop > "$BACKUP_DIR/db_$DATE.sql"
 
-# Удалять резервные копии старше 30 дней
-find $BACKUP_DIR -type f -mtime +30 -delete
+# Медиа
+[ -d "$PROJECT_DIR/media" ] && tar -czf "$BACKUP_DIR/media_$DATE.tar.gz" -C "$PROJECT_DIR" media
+
+# Конфиг и сервисные данные
+tar -czf "$BACKUP_DIR/config_$DATE.tar.gz" "$PROJECT_DIR/.env" "$PROJECT_DIR/data"
+
+# Ротация (30 дней)
+find "$BACKUP_DIR" -type f -mtime +30 -delete
 
 echo "Backup completed: $DATE"
-BACKUP
+```
 
+```bash
 chmod +x /opt/kaza-shop/backup.sh
+```
 
-Добавить в crontab (crontab -e):
-text
+Первый тестовый запуск:
 
+```bash
+cd /opt/kaza-shop && ./backup.sh
+ls -la /opt/backups/kaza-shop/
+```
+
+Ожидаемо есть файлы `db_*.sql`, `media_*.tar.gz`, `config_*.tar.gz`.
+
+Cron (ежедневно в 03:00):
+
+```bash
+crontab -e
+```
+
+```cron
 0 3 * * * /opt/kaza-shop/backup.sh >> /var/log/kaza-backup.log 2>&1
+```
 
-### 5.2 Ручное резервное копирование перед обновлением
-bash
+## 13. Восстановление из бэкапа (Disaster Recovery)
 
-ssh user@<vps-ip>
-cd /opt/kaza-shop
-./backup.sh
+1. Остановить сервис:
 
-## 6. Внесение изменений в работающий сервис
-### 6.1 Изменение кода бэкенда или бота (Python)
-bash
-
-# На локальной машине
-git add -A && git commit -m "fix: описание правки"
-
-# Скопировать изменённые файлы на сервер
-rsync -av app/ user@<vps-ip>:/opt/kaza-shop/app/
-
-# Перезапустить соответствующий контейнер
-ssh user@<vps-ip> "cd /opt/kaza-shop && docker compose -f docker-compose.prod.yml restart app bot"
-
-### 6.2 Изменение кода фронтенда (React)
-bash
-
-rsync -av seller-panel/src/ user@<vps-ip>:/opt/kaza-shop/seller-panel/src/
-ssh user@<vps-ip> "cd /opt/kaza-shop && docker compose -f docker-compose.prod.yml restart seller"
-
-### 6.3 Изменение Dockerfile, зависимостей или compose-файла
-bash
-
-rsync -av Dockerfile requirements.txt docker-compose.prod.yml user@<vps-ip>:/opt/kaza-shop/
-ssh user@<vps-ip> "cd /opt/kaza-shop && docker compose -f docker-compose.prod.yml build --no-cache app bot seller && docker compose -f docker-compose.prod.yml up -d"
-
-### 6.4 Изменение структуры БД (новые колонки в моделях)
-
-Если в модели добавляются новые поля, после переноса кода необходимо пересоздать БД с миграцией данных:
-bash
-
-# 1. Сделать резервную копию
-ssh user@<vps-ip> "/opt/kaza-shop/backup.sh"
-
-# 2. Сделать дамп
-ssh user@<vps-ip> "docker compose -f /opt/kaza-shop/docker-compose.prod.yml exec -T db pg_dump -U kaza_prod kaza_shop > /tmp/before_migration.sql"
-
-# 3. Остановить, удалить том БД, пересоздать
-ssh user@<vps-ip> << 'EOF'
+```bash
 cd /opt/kaza-shop
 docker compose -f docker-compose.prod.yml down
-docker volume rm kaza_shop_postgres_data
-docker compose -f docker-compose.prod.yml build --no-cache app bot
-docker compose -f docker-compose.prod.yml up -d
-EOF
+```
 
-# 4. Восстановить данные из дампа
-ssh user@<vps-ip> "docker compose -f /opt/kaza-shop/docker-compose.prod.yml exec -T db psql -U kaza_prod kaza_shop < /tmp/before_migration.sql"
+2. Восстановить медиа и конфиг:
 
-Более надёжный способ — подключить Alembic для миграций (рекомендуется при активной разработке).
-## 7. Диагностика и исправление ошибок
-### 7.1 Проверка состояния всех сервисов
-bash
+```bash
+tar -xzf /opt/backups/kaza-shop/config_YYYYMMDD_HHMMSS.tar.gz -C /
+tar -xzf /opt/backups/kaza-shop/media_YYYYMMDD_HHMMSS.tar.gz -C /opt/kaza-shop
+```
 
-docker compose -f docker-compose.prod.yml ps
+3. Поднять только БД и дождаться готовности:
 
-Все контейнеры должны быть Up и healthy.
-### 7.2 Логи конкретного сервиса
-bash
+```bash
+docker compose -f docker-compose.prod.yml up -d db
+```
 
-docker compose -f docker-compose.prod.yml logs app --tail 50   # бэкенд
-docker compose -f docker-compose.prod.yml logs bot --tail 50   # бот
-docker compose -f docker-compose.prod.yml logs db --tail 20    # база данных
+4. Восстановить БД:
 
-### 7.3 Частые ошибки и их решение
-Симптом	Причина	Решение
-Бот не отвечает	BOT_TOKEN не задан или невалиден	Проверить .env, перезапустить: docker compose restart bot
-Админка не грузится / ошибка сети	Упал контейнер app	docker compose logs app --tail 50, искать ошибку импорта или БД
-column ... does not exist	Добавлены новые поля в модель, но БД не обновлена	Выполнить миграцию БД (см. п. 6.4)
-Фото не отображаются в боте	Не сброшен кэш каталога	В админке: Настройки → Сбросить кэш каталога
-Connection refused между bot и app	Сетевой сбой Docker	docker compose restart bot
-Не приходят уведомления в Telegram	Неверный admin_contact в настройках	Проверить ID через @userinfobot, указать в админке
-Кнопка «Сформировать чек» не работает	fonts-dejavu-core не установлен	Пересобрать образ: docker compose build --no-cache app && docker compose up -d
-### 7.4 Полный перезапуск сервиса
-bash
+```bash
+cat /opt/backups/kaza-shop/db_YYYYMMDD_HHMMSS.sql | \
+  docker compose -f /opt/kaza-shop/docker-compose.prod.yml exec -T db \
+  psql -U kaza_prod -d kaza_shop
+```
 
+5. Поднять сервис:
+
+```bash
+docker compose -f /opt/kaza-shop/docker-compose.prod.yml up -d
+```
+
+6. Проверить `health` и вход в админку.
+
+## 14. Обновление сервиса на новую версию
+
+Перед обновлением сделайте backup:
+
+```bash
+cd /opt/kaza-shop && ./backup.sh
+```
+
+Загрузите новую версию (см. раздел 7), затем:
+
+```bash
 cd /opt/kaza-shop
-docker compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml build app bot seller
 docker compose -f docker-compose.prod.yml up -d
+```
 
-## 8. Обновление сервиса без потери данных
-Пошаговая процедура (безопасное обновление)
-bash
+Проверка:
 
-# 1. Резервная копия
-/opt/kaza-shop/backup.sh
-
-# 2. Перенести новый код
-rsync -av --exclude='.git' --exclude='*.log' ./ user@<vps-ip>:/opt/kaza-shop/
-
-# 3. Остановить и пересоздать контейнеры (тома остаются)
-ssh user@<vps-ip> << 'UPDATE'
-cd /opt/kaza-shop
-docker compose -f docker-compose.prod.yml down
-docker compose -f docker-compose.prod.yml build --no-cache app bot seller
-docker compose -f docker-compose.prod.yml up -d
-
-# Проверить
+```bash
 docker compose -f docker-compose.prod.yml ps
 curl http://localhost:8000/health
-UPDATE
+```
 
-После этого все данные (товары, заказы, фото, настройки) сохранятся, так как:
+## 15. Если сервис упал
 
-    postgres_data — именованный том Docker, не удаляется при down
+Диагностика:
 
-    media/ и data/ — bind-монтирования с хоста
+```bash
+cd /opt/kaza-shop
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs app --tail 100
+docker compose -f docker-compose.prod.yml logs bot --tail 100
+docker compose -f docker-compose.prod.yml logs db --tail 100
+```
 
-    seller_node_modules — именованный том
+Точечный перезапуск:
 
-## 9. Мониторинг и восстановление
-### 9.1 Внешний мониторинг
+```bash
+docker compose -f docker-compose.prod.yml restart app
+# или bot / db
+```
 
-Настроить UptimeRobot или аналогичный сервис на https://shop.example.com/health. При падении — алерт на Telegram или email.
-### 9.2 Автоматический перезапуск
+Полный перезапуск (без `-v`):
 
-Все сервисы в docker-compose имеют restart: always — Docker автоматически перезапустит упавший контейнер в течение нескольких секунд.
-### 9.3 Действия при полном падении VPS
+```bash
+docker compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml up -d
+```
 
-    Убедиться, что VPS снова доступен
+## 16. Что нельзя делать
 
-    Зайти по SSH
+- Не выполнять `docker compose down -v` (удаляет БД).
+- Не удалять `/opt/kaza-shop/.env`.
+- Не открывать наружу порт `5432`.
+- Не хранить `.env` в Git/облачных публичных папках.
+- Не обновлять сервис без свежего backup.
 
-    cd /opt/kaza-shop && docker compose -f docker-compose.prod.yml up -d
+## 17. Чеклист безопасности
 
-    Проверить docker compose -f docker-compose.prod.yml ps
+- `SECRET_KEY` уникальный и длинный.
+- `ADMIN_PASSWORD` и `DB_PASSWORD` стойкие.
+- Пароль админа сменен после первого входа.
+- Включен HTTPS.
+- Настроен backup + проверено восстановление.
+- На firewall открыты только `22/80/443`.
+- VPS размещен вне РФ для стабильной работы Telegram.
 
-    Данные восстановятся из томов автоматически
+## 18. Контакты поддержки
 
-## 10. Безопасность — чеклист
-
-    .env не в репозитории (добавлен в .gitignore)
-
-    SECRET_KEY заменён на случайный 64-символьный
-
-    ADMIN_PASSWORD заменён на стойкий пароль
-
-    CORS_ORIGINS указывает на конкретный домен
-
-    Порт БД не открыт наружу (в docker-compose.prod.yml секция ports для db удалена или 127.0.0.1)
-
-    Nginx + HTTPS настроен
-
-    server.log и другие логи не лежат в репозитории
-
-    Пароль админа изменён после первого входа
-
+- Telegram: `@your_username`
+- Email: `support@example.com`
+- Канал обновлений: `@kaza_shop`

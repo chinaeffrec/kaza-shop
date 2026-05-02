@@ -10,7 +10,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdf_canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db.session import get_session
@@ -129,7 +129,26 @@ async def get_user_orders(user_id: int, session: AsyncSession = Depends(get_sess
     result = await session.execute(
         select(Order).where(Order.user_id == user_id).order_by(Order.created_at.desc())
     )
-    return [_order_dict(o) for o in result.scalars().all()]
+    orders = result.scalars().all()
+    order_ids = [o.id for o in orders]
+    items_map = {}
+    if order_ids:
+        items_res = await session.execute(
+            select(OrderItem).where(OrderItem.order_id.in_(order_ids))
+        )
+        for item in items_res.scalars().all():
+            items_map.setdefault(item.order_id, []).append({
+                "name": item.name,
+                "price": item.price,
+                "quantity": item.quantity,
+                "sum": item.price * item.quantity,
+            })
+    result_list = []
+    for o in orders:
+        d = _order_dict(o)
+        d["items"] = items_map.get(o.id, [])
+        result_list.append(d)
+    return result_list
 
 
 @router.post("/")
@@ -240,14 +259,28 @@ async def create_order(data: dict, session: AsyncSession = Depends(get_session))
     }
 
 @router.get("/")
-async def list_orders(status: str | None = None, session: AsyncSession = Depends(get_session)):
-    query = select(Order).order_by(Order.created_at.desc())
+async def list_orders(
+    status: str | None = None,
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=20, ge=1),
+    session: AsyncSession = Depends(get_session),
+):
+    """Возвращает заказы с пагинацией."""
+    base_query = select(Order)
     if status:
-        query = query.where(Order.status == status)
+        base_query = base_query.where(Order.status == status)
+
+    total_query = select(Order)
+    if status:
+        total_query = total_query.where(Order.status == status)
+    total_result = await session.execute(total_query)
+    total = len(total_result.scalars().all())
+
+    offset = (page - 1) * per_page
+    query = base_query.order_by(Order.created_at.desc()).offset(offset).limit(per_page)
     result = await session.execute(query)
     orders = result.scalars().all()
 
-    # Обогащаем данными пользователей
     result_list = []
     for o in orders:
         d = _order_dict(o)
@@ -260,7 +293,14 @@ async def list_orders(status: str | None = None, session: AsyncSession = Depends
             d["user_name"] = f"ID:{o.user_id}"
             d["user_contact"] = None
         result_list.append(d)
-    return result_list
+
+    return {
+        "items": result_list,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": max(1, (total + per_page - 1) // per_page),
+    }
 
 
 @router.post("/{order_id}/receipt")
@@ -370,8 +410,23 @@ async def generate_and_send_receipt(order_id: int, session: AsyncSession = Depen
     y -= 5 * mm
     c.setFont(FONT_NAME, 9)
     seller_label = shop.legal_name or seller_contact or shop_name or "Kaza Shop"
-    c.drawString(15 * mm, y, seller_label)
-    y -= 8 * mm
+    max_width = width - 30 * mm
+    for line in seller_label.split('\n'):
+        words = line.split(' ')
+        current_line = ""
+        for word in words:
+            test_line = current_line + (" " if current_line else "") + word
+            if c.stringWidth(test_line, FONT_NAME, 9) < max_width:
+                current_line = test_line
+            else:
+                if current_line:
+                    c.drawString(15 * mm, y, current_line)
+                    y -= 5 * mm
+                current_line = word
+        if current_line:
+            c.drawString(15 * mm, y, current_line)
+            y -= 5 * mm
+    y -= 3 * mm
 
     # Печать
     if stamp_file:

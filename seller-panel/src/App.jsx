@@ -7,6 +7,7 @@ import ImportPage from './pages/ImportPage.jsx'
 import StatsPage from './pages/StatsPage.jsx'
 import SettingsPage from './pages/SettingsPage.jsx'
 import s from './App.module.css'
+import { useToast } from './components/Toast.jsx'
 
 const NAV = [
   { id: 'products', label: '📦 Товары' },
@@ -24,6 +25,7 @@ function getInitialPage() {
 }
 
 export default function App() {
+  const toast = useToast()
   const [authed, setAuthed]         = useState(false)
   const [authChecked, setChecked]   = useState(false)
   const [adminLogin, setAdminLogin] = useState('')
@@ -64,8 +66,8 @@ export default function App() {
     let cancelled = false
     const pollOrders = async () => {
       try {
-        const orders = await api.getOrders('new')
-        if (!cancelled) setNewOrders(orders.length)
+        const res = await api.getOrders('new', 1, 1)
+        if (!cancelled) setNewOrders(res.total)
       } catch {}
     }
 
@@ -99,7 +101,7 @@ export default function App() {
     setShopName(cfg.shop_name || 'Kaza Shop')
   }
 
-  if (!authChecked) return null  // ждём проверки токена
+  if (!authChecked) return null
   if (!authed) return <LoginPage onLogin={handleLogin} />
 
   return (

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api.js'
 import s from './ProductsPage.module.css'
+import ToggleSwitch from "../components/ToggleSwitch.jsx";
+import { useToast } from '../components/Toast.jsx'
 
 const EMPTY = {
   name: '',
@@ -15,7 +17,11 @@ const EMPTY = {
 }
 
 export default function ProductsPage() {
+  const toast = useToast()
   const [products, setProducts]           = useState([])
+  const [productsPage, setProductsPage]   = useState(1)
+  const [productsTotal, setProductsTotal] = useState(0)
+  const [productsPages, setProductsPages] = useState(1)
   const [categories, setCategories]       = useState([])
   const [allSubcats, setAllSubcats]       = useState({})
   const [subcats, setSubcats]             = useState([])
@@ -34,16 +40,20 @@ export default function ProductsPage() {
   const [saving, setSaving]               = useState(false)
   const [hideNoStock, setHideNoStock]     = useState(false)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (pageOverride) => {
+    const page = pageOverride || productsPage
     setLoading(true)
     try {
-      const [prods, cats, cfg] = await Promise.all([
-        api.getProducts(),
+      const [prodRes, cats, cfg] = await Promise.all([
+        api.getProducts(page, 20),
         api.getCategories(),
         api.getSettings(),
       ])
       setHideNoStock(cfg.hide_out_of_stock || false)
-      setProducts(prods)
+      setProducts(prodRes.items)
+      setProductsTotal(prodRes.total)
+      setProductsPages(prodRes.pages)
+      setProductsPage(prodRes.page)
       setCategories(cats)
       const subResults = await Promise.all(
         cats.map(cat => api.getSubcategories(cat.id).then(subs => ({ cat, subs })))
@@ -54,13 +64,13 @@ export default function ProductsPage() {
           subMap[sub.id] = { name: sub.name, category_name: cat.name, category_id: cat.id }
       setAllSubcats(subMap)
     } catch (e) {
-      alert('Ошибка загрузки: ' + e.message)
+      toast('Ошибка загрузки: ' + e.message)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [productsPage])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, [])
 
   useEffect(() => {
     if (!filterCat) { setFilterSubOpts([]); setFilterSub(''); return }
@@ -98,7 +108,6 @@ export default function ProductsPage() {
     setPhotoFile(null)
     setPhotoPreview(p.image_url ? api.BASE + p.image_url : null)
     setExtraPhotos({})
-    // Инициализируем превью существующих доп. фото из данных товара
     setExtraPreviews({
       2: p.image_url_2 ? api.BASE + p.image_url_2 : null,
       3: p.image_url_3 ? api.BASE + p.image_url_3 : null,
@@ -107,9 +116,9 @@ export default function ProductsPage() {
   }
 
   async function handleSave() {
-    if (!form.name.trim()) return alert('Введите название')
-    if (!form.price) return alert('Введите цену')
-    if (!form.subcategory_id) return alert('Выберите категорию и подкатегорию')
+    if (!form.name.trim()) return toast('Введите название')
+    if (!form.price) return toast('Введите цену')
+    if (!form.subcategory_id) return toast('Выберите категорию и подкатегорию')
 
     setSaving(true)
     try {
@@ -128,12 +137,10 @@ export default function ProductsPage() {
         ? await api.createProduct(payload)
         : await api.updateProduct(modal.product.id, payload)
 
-      // Основное фото (слот 1)
       if (photoFile) {
         await api.uploadPhotoSlot(saved.id, 1, photoFile)
       }
 
-      // Дополнительные фото (слоты 2 и 3)
       for (const [slot, file] of Object.entries(extraPhotos)) {
         if (file) {
           await api.uploadPhotoSlot(saved.id, parseInt(slot), file)
@@ -148,7 +155,7 @@ export default function ProductsPage() {
       await load()
     } catch (e) {
       console.error(e)
-      alert('Ошибка сохранения: ' + (e.message || e))
+      toast('Ошибка сохранения: ' + (e.message || e))
     } finally {
       setSaving(false)
     }
@@ -156,22 +163,17 @@ export default function ProductsPage() {
 
   async function handleDelete(id) {
     if (!confirm('Удалить товар?')) return
-    await api.deleteProduct(id).catch(e => alert(e.message))
+    await api.deleteProduct(id).catch(e => toast(e.message))
     await load()
   }
 
-  // async function handleDeletePhoto(id) {
-  //   await api.deletePhoto(id).catch(e => alert(e.message))
-  //   await load()
-  // }
-
   async function handleDeletePhotoSlot(productId, slot) {
-    await api.deletePhotoSlot(productId, slot).catch(e => alert(e.message))
+    await api.deletePhotoSlot(productId, slot).catch(e => toast(e.message))
     await load()
   }
 
   async function toggleActive(p) {
-    await api.toggleActive(p.id, !p.is_active).catch(e => alert(e.message))
+    await api.toggleActive(p.id, !p.is_active).catch(e => toast(e.message))
     await load()
   }
 
@@ -197,7 +199,7 @@ export default function ProductsPage() {
   return (
     <div>
       <div className={s.toolbar}>
-        <h1 className={s.title}>Товары <span className={s.count}>{products.length}</span></h1>
+        <h1 className={s.title}>Товары <span className={s.count}>{productsTotal}</span></h1>
         <button className={s.btnAdd} onClick={openAdd}>+ Добавить</button>
       </div>
 
@@ -216,17 +218,23 @@ export default function ProductsPage() {
             {filterSubOpts.map(sc => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
           </select>
         )}
-        <label className={s.checkLabel}>
-          <input type="checkbox" checked={onlyNoPhoto}
-            onChange={e => setOnlyNoPhoto(e.target.checked)} />
-          Без фото
-        </label>
-        <label className={s.checkLabel}>
-          <input type="checkbox" checked={hideNoStock}
-            onChange={e => toggleHideNoStock(e.target.checked)} />
-          Скрыть для покупателя товары без остатка
-        </label>
+        <ToggleSwitch checked={onlyNoPhoto} onChange={setOnlyNoPhoto} label="Без фото" />
+        <ToggleSwitch checked={hideNoStock} onChange={toggleHideNoStock} label="Скрыть для покупателя товары без остатка" />
       </div>
+
+      {productsPages > 1 && (
+        <div style={{display:'flex', gap:8, alignItems:'center', marginBottom:12, fontSize:13, color:'#555'}}>
+          <button onClick={() => load(productsPage - 1)} disabled={productsPage <= 1}
+            style={{padding:'4px 12px', borderRadius:6, border:'1px solid #ddd', background:'#fff', cursor:productsPage<=1?'default':'pointer'}}>
+            ←
+          </button>
+          <span>Стр. {productsPage} из {productsPages} (всего {productsTotal})</span>
+          <button onClick={() => load(productsPage + 1)} disabled={productsPage >= productsPages}
+            style={{padding:'4px 12px', borderRadius:6, border:'1px solid #ddd', background:'#fff', cursor:productsPage>=productsPages?'default':'pointer'}}>
+            →
+          </button>
+        </div>
+      )}
 
       {visible.length === 0 ? <p className={s.msg}>Товары не найдены</p> : (
         <table className={s.table}>
@@ -327,7 +335,6 @@ export default function ProductsPage() {
             {/* Фото 1, 2, 3 */}
             {[1, 2, 3].map(slot => {
               const isMain = slot === 1
-              // Показываем: новый preview (если выбран файл) ИЛИ существующее фото товара
               const preview = isMain
                 ? photoPreview
                 : extraPreviews[slot] || null
@@ -377,11 +384,9 @@ export default function ProductsPage() {
               )
             })}
 
-            <label className={s.checkLabel}>
-              <input type="checkbox" checked={form.is_active}
-                onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))} />
-              Активен (показывать в боте)
-            </label>
+            <ToggleSwitch checked={form.is_active}
+                          onChange={val => setForm(f => ({ ...f, is_active: val }))}
+                          label="Активен (показывать в боте)" />
 
             <div className={s.modalFooter}>
               <button className={s.btnCancel} onClick={() => setModal(null)}>Отмена</button>

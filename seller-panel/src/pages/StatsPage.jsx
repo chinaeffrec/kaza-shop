@@ -1,11 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api.js'
+import { useToast } from '../components/Toast.jsx'
 import s from './StatsPage.module.css'
 
 export default function StatsPage({ saved, onSave }) {
+  const toast = useToast()
   const [dashboard, setDashboard] = useState(saved?.dashboard || null)
   const [stats, setStats]         = useState(saved?.stats || [])
   const [products, setProducts]   = useState(saved?.products || {})
+  const [productsSummary, setProductsSummary] = useState(saved?.productsSummary || null)
   const [dateFrom, setDateFrom]   = useState(saved?.dateFrom || '')
   const [dateTo, setDateTo]       = useState(saved?.dateTo || '')
   const [loading, setLoading]     = useState(false)
@@ -18,24 +21,35 @@ export default function StatsPage({ saved, onSave }) {
     const to = nextFilters.dateTo ?? dateTo
 
     if (from && to && from > to) {
-      alert('Дата "По" не может быть раньше даты "С"')
+      toast('Дата "По" не может быть раньше даты "С"', 'error')
       return
     }
 
     setLoading(true)
     try {
-      const [dash, st, prods] = await Promise.all([
+      const [dash, statsRes, prods] = await Promise.all([
         api.getDashboard(from || null, to || null),
         api.getStats(from || null, to || null),
-        api.getProducts(),
+        api.getProducts(1, 10000),
       ])
       const map = {}
-      prods.forEach(p => { map[p.id] = p })
+      const prodItems = prods.items || prods
+      prodItems.forEach(p => { map[p.id] = p })
       setDashboard(dash)
-      setStats(st)
+      setStats(statsRes.items || [])
+      setProductsSummary(statsRes.summary || null)
       setProducts(map)
-      onSave?.({ dashboard: dash, stats: st, products: map, dateFrom: from, dateTo: to, sort, sortDir })
-    } catch(e) { alert(e.message) }
+      onSave?.({
+        dashboard: dash,
+        stats: statsRes.items || [],
+        productsSummary: statsRes.summary || null,
+        products: map,
+        dateFrom: from,
+        dateTo: to,
+        sort,
+        sortDir,
+      })
+    } catch(e) { toast(e.message, 'error') }
     finally { setLoading(false) }
   }, [dateFrom, dateTo, onSave, sort, sortDir])
 
@@ -52,7 +66,16 @@ export default function StatsPage({ saved, onSave }) {
     const nextDir = sort === col ? (sortDir === 'desc' ? 'asc' : 'desc') : 'desc'
     setSort(col)
     setSortDir(nextDir)
-    onSave?.({ dashboard, stats, products, dateFrom, dateTo, sort: col, sortDir: nextDir })
+    onSave?.({
+      dashboard,
+      stats,
+      productsSummary,
+      products,
+      dateFrom,
+      dateTo,
+      sort: col,
+      sortDir: nextDir,
+    })
   }
 
   const th = (col, label) => (
@@ -121,7 +144,7 @@ export default function StatsPage({ saved, onSave }) {
 
           <div style={{marginBottom: 12}}>
             <button className={s.btnApply} style={{background:'#43a047'}}
-              onClick={() => api.exportDashboard(dateFrom, dateTo).catch(e => alert('Ошибка экспорта: ' + e.message))}
+              onClick={() => api.exportDashboard(dateFrom, dateTo).catch(e => toast('Ошибка экспорта: ' + e.message, 'error'))}
             >
               📥 Экспорт в Excel
             </button>
@@ -158,11 +181,37 @@ export default function StatsPage({ saved, onSave }) {
           <>
             <div style={{marginBottom: 12}}>
               <button className={s.btnApply} style={{background:'#43a047'}}
-                onClick={() => api.exportStats(dateFrom, dateTo).catch(e => alert('Ошибка экспорта: ' + e.message))}
+                onClick={() => api.exportStats(dateFrom, dateTo).catch(e => toast('Ошибка экспорта: ' + e.message, 'error'))}
               >
                 📥 Экспорт в Excel
               </button>
             </div>
+
+            {productsSummary && (
+              <div className={s.summary} style={{marginBottom: 16}}>
+                <div className={s.card}>
+                  <div className={s.cardVal}>{fmt(productsSummary.total_sold_sum)} ₽</div>
+                  <div className={s.cardLabel}>Выручка за период</div>
+                </div>
+                <div className={s.card}>
+                  <div className={s.cardVal}>{productsSummary.total_sold_qty}</div>
+                  <div className={s.cardLabel}>Продано товаров</div>
+                </div>
+                <div className={s.card}>
+                  <div className={s.cardVal}>{productsSummary.avg_items_per_order}</div>
+                  <div className={s.cardLabel}>В среднем в заказе</div>
+                </div>
+                <div className={s.card}>
+                  <div className={s.cardVal}>{fmt(productsSummary.avg_price)} ₽</div>
+                  <div className={s.cardLabel}>Средняя цена</div>
+                </div>
+                <div className={s.card}>
+                  <div className={s.cardVal}>{productsSummary.total_returned}</div>
+                  <div className={s.cardLabel}>Возвратов</div>
+                </div>
+              </div>
+            )}
+
             <table className={s.table}>
               <thead><tr>
                 <th>Товар</th>

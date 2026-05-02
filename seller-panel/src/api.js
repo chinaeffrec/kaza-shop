@@ -83,7 +83,7 @@ export const api = {
   reloadCache:      () => req('POST', '/catalog/cache/reload'),
 
   // Products
-  getProducts:      () => req('GET', '/products/'),
+  getProducts:      (page = 1, perPage = 20) => req('GET', `/products/${buildQuery({ page, per_page: perPage })}`),
   getProduct:       (id) => req('GET', `/products/${id}`),
   createProduct:    (d) => req('POST', '/products/', d),
   updateProduct:    (id, d) => req('PATCH', `/products/${id}`, d),
@@ -98,7 +98,7 @@ export const api = {
   importXlsx: (file) => uploadFile('/import/products', file),
 
   // Orders
-  getOrders:        (status) => req('GET', `/orders/${buildQuery({ status })}`),
+  getOrders:        (status, page = 1, perPage = 20) => req('GET', `/orders/${buildQuery({ status, page, per_page: perPage })}`),
   getOrder:         (id) => req('GET', `/orders/${id}`),
   getOrderStatuses: () => req('GET', '/orders/statuses'),
   updateOrderStatus:(id, status, comment) => req('PATCH', `/orders/${id}/status`, { status, comment }),

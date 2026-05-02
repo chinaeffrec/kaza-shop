@@ -24,10 +24,13 @@ async def open_handler(callback: CallbackQuery):
         screen = Screen(type="products", subcategory_id=entity_id)
         navigation.push(user_id, screen)
 
+
     elif entity == "product":
         screen = Screen(type="product", product_id=entity_id)
         current = navigation.peek(user_id)
-        if not (current and current.type == "product"):
+        if current and current.type == "product":
+            navigation._stack[user_id][-1] = screen
+        else:
             navigation.push(user_id, screen)
 
     else:
@@ -43,14 +46,8 @@ async def back(callback: CallbackQuery):
     user_id = callback.from_user.id
     current = navigation.peek(user_id)
 
-    if current is None:
-        screen = Screen(type="categories")
-        navigation.push(user_id, screen)
-        await render_engine.render(screen, callback.message)
-        await callback.answer()
-        return
-
-    if current.type == "product":
+    # Если мы в карточке товара — идём в подкатегории через кэш
+    if current and current.type == "product":
         product = catalog_cache.get_product(current.product_id)
         if product:
             sub = catalog_cache.get_subcategory_by_id(product.subcategory_id)
@@ -62,7 +59,16 @@ async def back(callback: CallbackQuery):
                 await callback.answer()
                 return
 
-    # fallback: всё остальное → категории
+    # Если мы в списке подкатегорий или товаров — идём в категории
+    if current and current.type in ("subcategories", "products"):
+        navigation.reset(user_id)
+        screen = Screen(type="categories")
+        navigation.push(user_id, screen)
+        await render_engine.render(screen, callback.message)
+        await callback.answer()
+        return
+
+    # fallback: главное меню
     navigation.reset(user_id)
     screen = Screen(type="categories")
     navigation.push(user_id, screen)
