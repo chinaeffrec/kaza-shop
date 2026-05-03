@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db.session import get_session
 from app.models.cart import Cart
 from app.models.product import Product
@@ -17,7 +18,7 @@ async def _inc_cart_stat(product_id: int, session: AsyncSession):
     if not s:
         s = ProductStats(product_id=product_id, added_to_cart=0, ordered=0, returned=0)
         session.add(s)
-        await session.flush()   # <-- инициализирует объект, иначе поля = None
+        await session.flush()   # инициализирует объект, иначе поля = None
     s.added_to_cart = (s.added_to_cart or 0) + 1
 
 

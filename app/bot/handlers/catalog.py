@@ -1,13 +1,12 @@
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.types import CallbackQuery
 
+from app.bot.services.catalog_cache import catalog_cache
 from app.bot.services.navigation import navigation
 from app.bot.services.render_engine import render_engine, render_product_card
-from app.bot.services.catalog_cache import catalog_cache
 from app.bot.states.screen import Screen
 
 router = Router()
-
 
 @router.callback_query(F.data.startswith("open_"))
 async def open_handler(callback: CallbackQuery):
@@ -46,7 +45,6 @@ async def back(callback: CallbackQuery):
     user_id = callback.from_user.id
     current = navigation.peek(user_id)
 
-    # Если мы в карточке товара — идём в подкатегории через кэш
     if current and current.type == "product":
         product = catalog_cache.get_product(current.product_id)
         if product:
@@ -59,7 +57,6 @@ async def back(callback: CallbackQuery):
                 await callback.answer()
                 return
 
-    # Если мы в списке подкатегорий или товаров — идём в категории
     if current and current.type in ("subcategories", "products"):
         navigation.reset(user_id)
         screen = Screen(type="categories")
@@ -68,7 +65,6 @@ async def back(callback: CallbackQuery):
         await callback.answer()
         return
 
-    # fallback: главное меню
     navigation.reset(user_id)
     screen = Screen(type="categories")
     navigation.push(user_id, screen)
@@ -93,8 +89,3 @@ async def photo_switch(callback: CallbackQuery):
 
     await render_product_card(callback.message, product, product_idx, len(products_list), photo_idx)
     await callback.answer()
-
-
-# @router.callback_query(F.data == "noop")
-# async def noop(callback: CallbackQuery):
-#     await callback.answer()

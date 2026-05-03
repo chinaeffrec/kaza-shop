@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, createContext, useContext } from 'react'
+import { useState, useCallback, createContext, useContext } from 'react'
 import s from './Toast.module.css'
 
 const ToastContext = createContext(null)

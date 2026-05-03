@@ -1,17 +1,18 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from typing import Optional
-from fastapi.responses import StreamingResponse
 from io import BytesIO
+from typing import Optional
+
+from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl.styles import Border, Font, PatternFill, Side
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
-from app.models.product_stats import ProductStats
-from app.models.order import Order, OrderItem, ORDER_STATUSES
+from app.models.order import ORDER_STATUSES, Order, OrderItem
 from app.models.product import Product
+from app.models.product_stats import ProductStats
 from app.models.user import User
 
 router = APIRouter(prefix="/stats", tags=["stats"])
@@ -35,9 +36,7 @@ async def get_dashboard(
     date_to: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
 ):
-    """Сводный дашборд по заказам: выручка, статусы, последние заказы"""
 
-    # Базовый запрос заказов
     orders_q = select(Order).order_by(Order.created_at.desc())
     if date_from:
         orders_q = orders_q.where(Order.created_at >= datetime.fromisoformat(date_from))
@@ -105,7 +104,6 @@ async def get_all_stats(
     date_to: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
 ):
-    # Получаем количество заказов за период (для расчёта средних)
     dashboard_orders = 0
     try:
         orders_q = select(func.count(Order.id)).where(~Order.status.in_(["cancelled", "returned"]))
@@ -160,7 +158,6 @@ async def get_all_stats(
             "period_sold_sum": sold_sum,
         })
 
-    # Подсчитываем количество товаров с ненулевыми продажами
     products_with_sales = sum(1 for r in result if r["period_sold_qty"] > 0)
     avg_items_per_order = int(total_sold_qty / dashboard_orders) if dashboard_orders else 0
     avg_price = int(total_sold_sum / total_sold_qty) if total_sold_qty else 0
@@ -178,14 +175,6 @@ async def get_all_stats(
     }
 
 
-# @router.post("/products/{product_id}/cart_add")
-# async def track_cart_add(product_id: int, session: AsyncSession = Depends(get_session)):
-#     s = await ensure_stats(product_id, session)
-#     s.added_to_cart += 1
-#     await session.commit()
-#     return {"ok": True}
-
-
 @router.post("/products/{product_id}/return")
 async def track_return(product_id: int, session: AsyncSession = Depends(get_session)):
     s = await ensure_stats(product_id, session)
@@ -199,7 +188,6 @@ async def export_dashboard(
     date_to: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
 ):
-    """Экспорт статистики по заказам в Excel."""
     dashboard = await get_dashboard(date_from, date_to, session)
 
     wb = Workbook()
@@ -214,12 +202,10 @@ async def export_dashboard(
         top=Side(style='thin'), bottom=Side(style='thin'),
     )
 
-    # Заголовок
     ws.merge_cells('A1:C1')
     ws['A1'] = f"Статистика заказов • Период: {date_from or '—'} – {date_to or '—'}"
     ws['A1'].font = Font(bold=True, size=14)
 
-    # Summary
     ws['A3'] = "Показатель"; ws['B3'] = "Значение"
     for col in (1, 2):
         c = ws.cell(row=3, column=col)
@@ -235,7 +221,6 @@ async def export_dashboard(
         ws.cell(row=4 + i, column=1, value=label).border = thin_border
         ws.cell(row=4 + i, column=2, value=value).border = thin_border
 
-    # По статусам
     ws['A10'] = "Статус"; ws['B10'] = "Количество"
     for col in (1, 2):
         c = ws.cell(row=10, column=col)
@@ -245,7 +230,6 @@ async def export_dashboard(
         ws.cell(row=11 + i, column=1, value=st['label']).border = thin_border
         ws.cell(row=11 + i, column=2, value=st['count']).border = thin_border
 
-    # Последние заказы
     start = 11 + len(dashboard.get('orders_by_status', [])) + 2
     ws.cell(row=start, column=1, value="Последние заказы").font = Font(bold=True, size=12)
     start += 1
@@ -287,7 +271,6 @@ async def export_products_stats(
     date_to: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
 ):
-    """Экспорт статистики по товарам в Excel."""
     stats = await get_all_stats(date_from, date_to, session)
     stats = stats["items"] if isinstance(stats, dict) else stats
     products_res = await session.execute(select(Product))

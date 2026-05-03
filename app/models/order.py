@@ -1,9 +1,11 @@
 from __future__ import annotations
-from datetime import datetime
-from sqlalchemy import ForeignKey, BigInteger, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.db.base import Base
 
+from datetime import datetime
+
+from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base
 
 ORDER_STATUSES = {
     "new":       "🆕 Новый",

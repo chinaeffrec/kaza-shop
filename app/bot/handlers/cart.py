@@ -1,6 +1,6 @@
-from aiogram import Router, F
-from aiogram.types import CallbackQuery
 import httpx
+from aiogram import F, Router
+from aiogram.types import CallbackQuery
 
 router = Router()
 BASE_URL = "http://app:8000"

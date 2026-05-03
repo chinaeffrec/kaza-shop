@@ -1,4 +1,3 @@
-"""Отслеживание сообщений бота для последующей очистки."""
 from typing import Dict, List
 
 _sent: Dict[int, List[int]] = {}
@@ -10,7 +9,6 @@ def track(user_id: int, message_id: int):
         _sent[user_id].append(message_id)
 
 async def clear_and_reset(user_id: int, bot) -> None:
-    """Удаляет все сообщения бота для пользователя и очищает историю."""
     mids = _sent.pop(user_id, [])
     for mid in sorted(mids, reverse=True):
         try:

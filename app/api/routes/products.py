@@ -1,12 +1,12 @@
 import uuid
-import aiofiles
 from pathlib import Path
-
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from pydantic import BaseModel
 from typing import Optional
+
+import aiofiles
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
 from app.models.product import Product
@@ -48,6 +48,10 @@ class ProductUpdate(BaseModel):
     subcategory_id: Optional[int] = None
 
 
+class ProductBulkDelete(BaseModel):
+    ids: list[int]
+
+
 @router.post("/", response_model=dict)
 async def create_product(data: ProductCreate, session: AsyncSession = Depends(get_session)):
     product = Product(**data.dict())
@@ -64,7 +68,6 @@ async def list_products(
     per_page: int = Query(default=20, ge=1),
     session: AsyncSession = Depends(get_session),
 ):
-    """Возвращает товары с пагинацией. page=1, per_page=20 по умолчанию."""
     total_result = await session.execute(select(Product))
     total = len(total_result.scalars().all())
 
@@ -82,11 +85,6 @@ async def list_products(
     }
 
 
-# @router.get("/{product_id}", response_model=dict)
-# async def get_product(product_id: int, session: AsyncSession = Depends(get_session)):
-#     return _product_dict(await _get_or_404(product_id, session))
-
-
 @router.patch("/{product_id}", response_model=dict)
 async def update_product(product_id: int, data: ProductUpdate, session: AsyncSession = Depends(get_session)):
     product = await _get_or_404(product_id, session)
@@ -101,7 +99,6 @@ async def update_product(product_id: int, data: ProductUpdate, session: AsyncSes
 @router.delete("/{product_id}")
 async def delete_product(product_id: int, session: AsyncSession = Depends(get_session)):
     product = await _get_or_404(product_id, session)
-    # Удаляем все фото
     for field in ("image_file_id", "image_file_id_2", "image_file_id_3"):
         fn = getattr(product, field, None)
         if fn:
@@ -114,29 +111,35 @@ async def delete_product(product_id: int, session: AsyncSession = Depends(get_se
     return {"status": "deleted"}
 
 
-# ─── Фото (слот 1 — основное, слоты 2 и 3 — дополнительные) ─────────────────
+@router.post("/bulk-delete")
+async def bulk_delete_products(data: ProductBulkDelete, session: AsyncSession = Depends(get_session)):
+    ids = sorted(set(i for i in data.ids if isinstance(i, int) and i > 0))
+    if not ids:
+        raise HTTPException(400, "No product ids provided")
+
+    result = await session.execute(select(Product).where(Product.id.in_(ids)))
+    products = result.scalars().all()
+    if not products:
+        return {"status": "ok", "deleted": 0}
+
+    for product in products:
+        for field in ("image_file_id", "image_file_id_2", "image_file_id_3"):
+            fn = getattr(product, field, None)
+            if fn:
+                p = MEDIA_DIR / fn
+                if p.exists():
+                    p.unlink()
+        await session.delete(product)
+
+    await session.commit()
+    await _reload_bot_cache()
+    return {"status": "ok", "deleted": len(products)}
+
 
 def _photo_field(slot: int) -> str:
-    """Возвращает имя поля модели для данного слота фото."""
     if slot == 1:
         return "image_file_id"
     return f"image_file_id_{slot}"
-
-
-# @router.post("/{product_id}/photo")
-# async def upload_photo(
-#     product_id: int,
-#     file: UploadFile = File(...),
-#     session: AsyncSession = Depends(get_session),
-# ):
-#     """Загрузка основного фото (слот 1)."""
-#     return await _upload_slot(product_id, 1, file, session)
-
-
-# @router.delete("/{product_id}/photo")
-# async def delete_photo(product_id: int, session: AsyncSession = Depends(get_session)):
-#     """Удаление основного фото (слот 1)."""
-#     return await _delete_slot(product_id, 1, session)
 
 
 @router.post("/{product_id}/photo/{slot}")
@@ -146,7 +149,6 @@ async def upload_photo_slot(
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
 ):
-    """Загрузка фото в слот 1, 2 или 3."""
     if slot not in (1, 2, 3):
         raise HTTPException(400, "Slot must be 1, 2 or 3")
     return await _upload_slot(product_id, slot, file, session)
@@ -158,7 +160,6 @@ async def delete_photo_slot(
     slot: int,
     session: AsyncSession = Depends(get_session),
 ):
-    """Удаление фото из слота 1, 2 или 3."""
     if slot not in (1, 2, 3):
         raise HTTPException(400, "Slot must be 1, 2 or 3")
     return await _delete_slot(product_id, slot, session)
@@ -170,7 +171,6 @@ async def _upload_slot(product_id: int, slot: int, file: UploadFile, session: As
     product = await _get_or_404(product_id, session)
     field = _photo_field(slot)
 
-    # Удаляем старый файл если есть
     old_fn = getattr(product, field, None)
     if old_fn:
         old_path = MEDIA_DIR / old_fn
@@ -204,9 +204,6 @@ async def _delete_slot(product_id: int, slot: int, session: AsyncSession):
         await _reload_bot_cache()
     return {"status": "ok"}
 
-
-# ─── Helpers ─────────────────────────────────────────────────────────────────
-
 async def _get_or_404(product_id: int, session: AsyncSession) -> Product:
     result = await session.execute(select(Product).where(Product.id == product_id))
     product = result.scalar_one_or_none()
@@ -216,7 +213,6 @@ async def _get_or_404(product_id: int, session: AsyncSession) -> Product:
 
 
 def _product_dict(p: Product) -> dict:
-    # Собираем список всех фото (только непустые)
     images = [
         f for f in [
             p.image_file_id,

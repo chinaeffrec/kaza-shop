@@ -84,12 +84,10 @@ export const api = {
 
   // Products
   getProducts:      (page = 1, perPage = 20) => req('GET', `/products/${buildQuery({ page, per_page: perPage })}`),
-  getProduct:       (id) => req('GET', `/products/${id}`),
   createProduct:    (d) => req('POST', '/products/', d),
   updateProduct:    (id, d) => req('PATCH', `/products/${id}`, d),
   deleteProduct:    (id) => req('DELETE', `/products/${id}`),
-  uploadPhoto:      (id, file) => uploadFile(`/products/${id}/photo`, file),
-  deletePhoto:      (id) => req('DELETE', `/products/${id}/photo`),
+  bulkDeleteProducts: (ids) => req('POST', '/products/bulk-delete', { ids }),
   uploadPhotoSlot:  (id, slot, file) => uploadFile(`/products/${id}/photo/${slot}`, file),
   deletePhotoSlot:  (id, slot) => req('DELETE', `/products/${id}/photo/${slot}`),
   toggleActive:     (id, is_active) => req('PATCH', `/products/${id}`, { is_active }),

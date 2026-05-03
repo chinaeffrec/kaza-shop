@@ -1,4 +1,4 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def categories_kb(categories):
@@ -38,16 +38,3 @@ def products_kb(products):
         ]
     ])
 
-
-# =========================
-# 📄 PRODUCT KB (ВОТ ОН)
-# =========================
-# def product_kb(product_id: int):
-#     return InlineKeyboardMarkup(inline_keyboard=[
-#         [
-#             InlineKeyboardButton(text="🛒", callback_data=f"cart_add_{product_id}"),
-#         ],
-#         [
-#             InlineKeyboardButton(text="⬅️ Назад", callback_data="back")
-#         ]
-#     ])

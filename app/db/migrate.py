@@ -1,11 +1,8 @@
-"""
-Миграция: добавляет недостающие колонки в существующие таблицы.
-Запуск: docker exec kaza_shop-app-1 python -m app.db.migrate
-"""
 import asyncio
 import os
-from sqlalchemy.ext.asyncio import create_async_engine
+
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 DATABASE_URL = (
     f"postgresql+asyncpg://{os.getenv('DB_USER')}:"
@@ -16,21 +13,20 @@ DATABASE_URL = (
 )
 
 MIGRATIONS = [
-    # products
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS image_file_id VARCHAR(512)",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS discount_price INTEGER",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INTEGER DEFAULT 0",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
-    # Если characteristics был JSON — меняем на TEXT
+
     "ALTER TABLE products ALTER COLUMN characteristics TYPE TEXT USING characteristics::TEXT",
-    # categories/subcategories — убираем slug если есть
+
     "ALTER TABLE categories DROP COLUMN IF EXISTS slug",
     "ALTER TABLE subcategories DROP COLUMN IF EXISTS slug",
-    # orders
+
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS comment TEXT",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_address TEXT",
-    # shop_settings
+
     "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS welcome_message TEXT",
     "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS seller_contact VARCHAR(256)",
     "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS admin_contact VARCHAR(256)",

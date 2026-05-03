@@ -2,27 +2,26 @@ import os
 import tempfile
 import uuid
 import zipfile
-import aiofiles
 from datetime import datetime
 from pathlib import Path
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from pydantic import BaseModel
 from typing import Optional
+
+import aiofiles
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask
 
 from app.db.session import get_session
-from app.models.settings import ShopSettings, FaqItem
+from app.models.settings import FaqItem, ShopSettings
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 MEDIA_DIR = Path("/app/media")
 LOGS_DIR = Path(__file__).resolve().parents[2] / "media" / "logs"
 
-
-# ── helpers ──────────────────────────────────────────────
 
 async def _get_settings(session: AsyncSession) -> ShopSettings:
     res = await session.execute(select(ShopSettings).where(ShopSettings.id == 1))
@@ -33,8 +32,6 @@ async def _get_settings(session: AsyncSession) -> ShopSettings:
         await session.flush()
     return s
 
-
-# ── ShopSettings ─────────────────────────────────────────
 
 @router.get("/")
 async def get_settings(session: AsyncSession = Depends(get_session)):
@@ -210,8 +207,6 @@ def _settings_dict(s: ShopSettings) -> dict:
         "legal_name": s.legal_name,
     }
 
-
-# ── FAQ ──────────────────────────────────────────────────
 
 faq_router = APIRouter(prefix="/faq", tags=["faq"])
 

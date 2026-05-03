@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from pydantic import BaseModel
 from typing import Optional
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db.session import get_session
 from app.models.user import User
 
@@ -23,7 +25,6 @@ async def register_user(data: UserRegister, session: AsyncSession = Depends(get_
                     first_name=data.first_name, last_name=data.last_name)
         session.add(user)
     else:
-        # Обновляем данные если изменились
         user.username = data.username
         user.first_name = data.first_name
         user.last_name = data.last_name

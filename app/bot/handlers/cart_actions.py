@@ -1,6 +1,6 @@
-from aiogram import Router, F
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 import httpx
+from aiogram import F, Router
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 router = Router()
 BASE_URL = "http://app:8000"
@@ -11,7 +11,7 @@ async def refresh_cart(callback: CallbackQuery):
         response = await client.get(f"{BASE_URL}/cart/{user_id}")
     data = response.json()
 
-    from app.bot.handlers.menu import build_cart_text, build_cart_keyboard
+    from app.bot.handlers.menu import build_cart_keyboard, build_cart_text
     if not data.get("items"):
         await callback.message.edit_text(
             "Ваша корзина пуста",

@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
 from app.db.session import get_session
 from app.models.category import Category
-from app.models.subcategory import SubCategory
 from app.models.product import Product
+from app.models.subcategory import SubCategory
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -44,14 +44,12 @@ async def get_products(
     query = select(Product).where(
         Product.subcategory_id == subcategory_id,
         Product.is_active == True
-    )
+    ).order_by(func.lower(Product.name).asc(), Product.id.asc())
     if hide_oos:
         query = query.where(Product.stock > 0)
 
     result = await session.execute(query)
     products = result.scalars().all()
-
-    # catalog.py — в списке возвращаемых полей товара добавить:
 
     return [
         {
@@ -102,7 +100,7 @@ async def get_product(product_id: int, session: AsyncSession = Depends(get_sessi
 
 @router.post("/cache/reload")
 async def reload_cache():
-    """Сбрасывает кэш каталога в боте"""
+# Сбрасывает кэш каталога в боте
     try:
         import httpx
         async with httpx.AsyncClient(timeout=5) as client:

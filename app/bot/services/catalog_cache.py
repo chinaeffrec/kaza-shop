@@ -2,6 +2,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+
 import httpx
 
 BASE_URL = "http://app:8000"
@@ -16,11 +17,11 @@ class Product:
     discount_price: Optional[int]
     description: Optional[str]
     characteristics: Optional[str]
-    image: Optional[str]          # старое поле (image_file_id)
-    images: list                  # список имён файлов
-    image_url: Optional[str]      # <-- добавляем
-    image_url_2: Optional[str]    # <-- добавляем
-    image_url_3: Optional[str]    # <-- добавляем
+    image: Optional[str]
+    images: list
+    image_url: Optional[str]
+    image_url_2: Optional[str]
+    image_url_3: Optional[str]
     subcategory_id: int
 
 
@@ -130,7 +131,6 @@ class CatalogCache:
         return list(self.categories.values())
 
     def get_visible_categories(self) -> List[Category]:
-        """Возвращает только категории, в которых есть товары."""
         result = []
         for cat in self.categories.values():
             visible_subs = [s for s in cat.subcategories if s.products]

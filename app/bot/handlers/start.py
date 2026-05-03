@@ -1,8 +1,10 @@
-import httpx
 import time
+
+import httpx
 from aiogram import Router
-from aiogram.types import Message
 from aiogram.filters import Command
+from aiogram.types import Message
+
 from app.bot.keyboards.menu import main_menu
 from app.bot.services.bot_messages import track
 
@@ -10,7 +12,6 @@ router = Router()
 BASE_URL = "http://app:8000"
 DEFAULT_WELCOME = "👋 Добро пожаловать!\n\nВыберите действие:"
 
-# Дедупликация /start на Android (клиент может слать скрытый + явный)
 _last_start: dict[int, float] = {}
 
 
@@ -19,9 +20,7 @@ async def start_handler(message: Message):
     user_id = message.from_user.id
     now = time.time()
 
-    # Игнорируем дубли в течение 3 секунд
     if user_id in _last_start and (now - _last_start[user_id]) < 3:
-        # Удаляем дубликат сообщения (баг клиента Android)
         try:
             await message.delete()
         except Exception:
@@ -29,7 +28,6 @@ async def start_handler(message: Message):
         return
     _last_start[user_id] = now
 
-    # Регистрируем пользователя
     user = message.from_user
     try:
         async with httpx.AsyncClient(timeout=3) as client:

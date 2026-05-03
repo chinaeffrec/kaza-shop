@@ -1,27 +1,25 @@
 import logging
 import os
-
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
 from pathlib import Path
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+
 import app.models
-# import app.db.init_models
-
-from app.db.engine import engine
-from app.db.base import Base
-
-from app.api.routes.products import router as products_router
-from app.api.routes.cart import router as cart_router
-from app.api.routes.imports import router as import_router
-from app.api.routes.catalog import router as catalog_router
-from app.api.routes.orders import router as orders_router
-from app.api.routes.settings import router as settings_router, faq_router
-from app.api.routes.stats import router as stats_router
 from app.api.routes.auth import router as auth_router
+from app.api.routes.cart import router as cart_router
+from app.api.routes.catalog import router as catalog_router
+from app.api.routes.imports import router as import_router
+from app.api.routes.orders import router as orders_router
+from app.api.routes.products import router as products_router
+from app.api.routes.settings import faq_router
+from app.api.routes.settings import router as settings_router
+from app.api.routes.stats import router as stats_router
 from app.api.routes.users import router as users_router
+from app.db.base import Base
+from app.db.engine import engine
 from app.logging_setup import configure_logging
 
 configure_logging("app")
@@ -29,13 +27,11 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Kaza Shop API", version="0.4.0")
 
-
 @app.on_event("startup")
 async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Tables created / verified")
-
 
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(

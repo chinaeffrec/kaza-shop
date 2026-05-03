@@ -1,16 +1,21 @@
-from aiogram import Router, F
+import httpx
+from aiogram import F, Router
 from aiogram.filters import StateFilter
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-import httpx, io, qrcode
-from aiogram.types import BufferedInputFile
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
-from app.bot.services.navigation import navigation
-from app.bot.states.screen import Screen
-from app.bot.services.render_engine import render_engine
 from app.bot.keyboards.menu import main_menu
-from app.bot.services.bot_messages import track, clear_and_reset
+from app.bot.services.bot_messages import clear_and_reset, track
+from app.bot.services.navigation import navigation
+from app.bot.services.render_engine import render_engine
+from app.bot.states.screen import Screen
 
 router = Router()
 BASE_URL = "http://app:8000"
@@ -37,10 +42,6 @@ async def _replace_with_text(message: Message, text: str, reply_markup=None, par
         track(message.chat.id, sent.message_id)
 
 
-# ─────────────────────────────────────────
-# Cart helpers
-# ─────────────────────────────────────────
-
 def build_cart_text(data: dict) -> str:
     lines = ["🛒 <b>Ваша корзина</b>\n"]
     for item in data["items"]:
@@ -65,15 +66,10 @@ def build_cart_keyboard(data: dict) -> InlineKeyboardMarkup:
 
 
 def _fmt_price(price: int | float) -> str:
-    """1000 → 1 000 ₽, 55.99 → 55.99 ₽"""
     if isinstance(price, float) and price != int(price):
         return f"{price:,.2f} ₽".replace(",", " ")
     return f"{int(price):,} ₽".replace(",", " ")
 
-
-# ─────────────────────────────────────────
-# Handlers
-# ─────────────────────────────────────────
 
 @router.callback_query(F.data == "menu_catalog")
 async def open_catalog(callback: CallbackQuery):
@@ -119,7 +115,6 @@ async def open_order_status(callback: CallbackQuery):
         response = await client.get(f"{BASE_URL}/orders/user/{user_id}")
     orders = response.json()
 
-    # Разделяем на активные и завершённые
     active = [o for o in orders if o["status"] not in ("delivered", "cancelled", "returned")]
     done = [o for o in orders if o["status"] in ("delivered",)]
 
@@ -222,11 +217,8 @@ async def menu_back(callback: CallbackQuery, state: FSMContext):
     except Exception:
         pass
     await _replace_with_text(callback.message, welcome_text, reply_markup=main_menu())
-    # Трекаем новое сообщение если было отправлено (при удалении фото)
     await callback.answer()
 
-
-# ─── Checkout flow ───────────────────────────────────
 
 @router.callback_query(F.data == "checkout")
 async def checkout_start(callback: CallbackQuery, state: FSMContext):
@@ -314,7 +306,6 @@ async def _finalize_order(message, state: FSMContext, address: str):
     cart_data = cart_resp.json()
     total = cart_data.get("total", 0)
 
-    # Создаём заказ
     async with httpx.AsyncClient() as client:
         response = await client.post(
             f"{BASE_URL}/orders/",
@@ -348,7 +339,6 @@ async def _finalize_order(message, state: FSMContext, address: str):
         [InlineKeyboardButton(text="🏠 В меню", callback_data="menu_back")],
     ])
 
-    # Проверяем, загружен ли QR-код в настройках
     qr_url = None
     qr_comment = ""
     try:
@@ -380,13 +370,11 @@ async def _finalize_order(message, state: FSMContext, address: str):
         except Exception:
             pass
 
-    # Без QR — текст с просьбой связаться
     caption += "\nДля оплаты свяжитесь с продавцом."
     await message.answer(caption, reply_markup=kb, parse_mode="HTML")
 
 @router.callback_query(F.data == "menu_refresh")
 async def menu_refresh(callback: CallbackQuery, state: FSMContext):
-    """Очищает историю сообщений и показывает главное меню."""
     navigation.reset(callback.from_user.id)
     await state.clear()
 
@@ -399,10 +387,8 @@ async def menu_refresh(callback: CallbackQuery, state: FSMContext):
     except Exception:
         pass
 
-    # Удаляем все предыдущие сообщения бота
     await clear_and_reset(callback.from_user.id, callback.bot)
 
-    # Отправляем новое сообщение с меню
     sent = await callback.bot.send_message(
         callback.from_user.id,
         welcome_text,

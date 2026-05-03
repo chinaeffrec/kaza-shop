@@ -1,10 +1,10 @@
 from sqlalchemy import ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column
+
 from app.db.base import Base
 
 
 class ProductStats(Base):
-    """Счётчики по товару. Одна строка на товар."""
     __tablename__ = "product_stats"
 
     product_id: Mapped[int] = mapped_column(

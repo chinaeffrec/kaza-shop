@@ -44,3 +44,6 @@ server.log
 media/.admin_creds.json
 data/.admin_creds.json
 *.swp
+
+#imports
+.isort.cfg

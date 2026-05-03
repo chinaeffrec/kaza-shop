@@ -1,10 +1,10 @@
-from sqlalchemy import Text, String, Boolean, Column
+from sqlalchemy import Boolean, Column, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
+
 from app.db.base import Base
 
 
 class ShopSettings(Base):
-    """Singleton-таблица: всегда одна строка с id=1"""
     __tablename__ = "shop_settings"
 
     welcome_message: Mapped[str | None] = mapped_column(

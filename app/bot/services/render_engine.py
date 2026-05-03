@@ -1,18 +1,19 @@
 import logging
+
 import httpx
-# from pathlib import Path
+
 from aiogram.types import (
-    InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton, Message,
-    BufferedInputFile
+    BufferedInputFile,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaPhoto,
+    Message,
 )
 
-from app.bot.services.catalog_cache import catalog_cache
 from app.bot.keyboards.catalog import categories_kb, subcategories_kb
+from app.bot.services.catalog_cache import catalog_cache
 
 logger = logging.getLogger(__name__)
-
-# Бот и app оба монтируют ./media:/app/media — читаем файлы напрямую
-#MEDIA_DIR = Path("/app/media")
 
 
 def _fmt_price(price) -> str:
@@ -37,7 +38,6 @@ def _product_kb(product, idx: int, total: int, products: list, photo_idx: int = 
 
     rows = []
 
-    # Галерея фото внутри карточки — ПЕРВОЙ, сразу под фото
     if len(image_urls) > 1:
         prev_pi = (photo_idx - 1) % len(image_urls)
         next_pi = (photo_idx + 1) % len(image_urls)
@@ -47,7 +47,6 @@ def _product_kb(product, idx: int, total: int, products: list, photo_idx: int = 
             InlineKeyboardButton(text="Фото ▶️", callback_data=f"photo_{product.id}_{next_pi}"),
         ])
 
-    # Навигация по товарам — ВТОРОЙ
     nav_row = []
     if idx > 0:
         nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"open_product_{products[idx-1].id}"))
@@ -65,11 +64,10 @@ def _product_kb(product, idx: int, total: int, products: list, photo_idx: int = 
 
 
 async def _generate_placeholder_image(product) -> bytes:
-    """Генерирует стилизованную карточку товара без фото."""
-    from PIL import Image, ImageDraw, ImageFont
     import io
 
-    # Получаем название магазина из настроек
+    from PIL import Image, ImageDraw, ImageFont
+
     shop_title = "Kaza Shop"
     try:
         async with httpx.AsyncClient(timeout=2) as client:
@@ -83,10 +81,8 @@ async def _generate_placeholder_image(product) -> bytes:
     img = Image.new('RGB', (W, H), color=(255, 255, 255))
     draw = ImageDraw.Draw(img)
 
-    # Рамка
     draw.rectangle([0, 0, W - 1, H - 1], outline=(220, 220, 230), width=2)
 
-    # Верхняя плашка
     draw.rectangle([0, 0, W, 60], fill=(108, 99, 255))
 
     try:
@@ -96,26 +92,21 @@ async def _generate_placeholder_image(product) -> bytes:
     except Exception:
         font_title = font_price = font_body = ImageFont.load_default()
 
-    # Название магазина в плашке
     shop_display = shop_title[:30] + ("..." if len(shop_title) > 30 else "")
     draw.text((20, 15), shop_display, fill=(255, 255, 255), font=font_title)
 
-    # Иконка «нет фото»
     draw.ellipse([W//2 - 40, 100, W//2 + 40, 180], outline=(200, 200, 210), width=3)
     draw.line([W//2 - 20, 140, W//2 + 20, 140], fill=(200, 200, 210), width=3)
     draw.line([W//2, 120, W//2, 160], fill=(200, 200, 210), width=3)
 
-    # Название товара
     name = product.name[:35] + ("..." if len(product.name) > 35 else "")
     draw.text((30, 210), name, fill=(40, 40, 60), font=font_title)
 
-    # Цена
     price_text = f"{product.price:,} ₽".replace(",", " ")
     bbox = draw.textbbox((0, 0), price_text, font=font_price)
     price_w = bbox[2] - bbox[0]
     draw.text((W - price_w - 30, 260), price_text, fill=(108, 99, 255), font=font_price)
 
-    # Описание (если есть)
     if product.description:
         desc = product.description[:60] + ("..." if len(product.description or "") > 60 else "")
         draw.text((30, 310), desc, fill=(150, 150, 160), font=font_body)
@@ -138,7 +129,6 @@ async def render_product_card(message: Message, product, idx: int, total: int, p
     filename = "product.jpg"
 
     if image_urls:
-        # Есть фото — скачиваем
         url = image_urls[photo_idx % len(image_urls)]
         async with httpx.AsyncClient(timeout=10) as client:
             try:
@@ -149,7 +139,6 @@ async def render_product_card(message: Message, product, idx: int, total: int, p
             except Exception as e:
                 logger.warning("Failed to download photo %s: %s", url, e)
 
-    # Нет фото или не удалось скачать — генерируем заглушку
     if not photo_content:
         try:
             photo_content = await _generate_placeholder_image(product)
@@ -159,7 +148,6 @@ async def render_product_card(message: Message, product, idx: int, total: int, p
             await _safe_edit_text(message, caption, kb)
             return
 
-    # Всегда отправляем как фото-сообщение — чтобы edit_media работал при переходах
     try:
         photo = BufferedInputFile(photo_content, filename=filename)
         if message.photo:
@@ -195,7 +183,6 @@ def _product_caption(product) -> str:
     return "\n".join(lines)
 
 async def _render_text(message: Message, text: str, kb: InlineKeyboardMarkup):
-    """Безопасно отображает текстовый экран: если message — фото, удаляет и отправляет новое."""
     if message.photo or message.document:
         try:
             await message.delete()
@@ -287,7 +274,7 @@ class RenderEngine:
             await render_product_card(message, product, idx, total)
 
         elif screen.type == "cart":
-            from app.bot.handlers.menu import build_cart_text, build_cart_keyboard
+            from app.bot.handlers.menu import build_cart_keyboard, build_cart_text
             user_id = message.chat.id
             async with httpx.AsyncClient() as client:
                 response = await client.get(f"http://app:8000/cart/{user_id}")

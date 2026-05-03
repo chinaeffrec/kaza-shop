@@ -3,7 +3,7 @@ from typing import Optional
 
 @dataclass
 class Screen:
-    type: str  # categories | subcategories | products | product | cart
+    type: str
 
     category_id: Optional[int] = None
     subcategory_id: Optional[int] = None

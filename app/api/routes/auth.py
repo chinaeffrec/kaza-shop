@@ -1,35 +1,26 @@
-"""
-Авторизация администратора.
-- Первый запуск: логин admin, пароль из ADMIN_PASSWORD в .env (или 'changeme123!')
-- После входа возвращается JWT-токен (24 часа)
-- Смена логина/пароля через PATCH /auth/credentials
-"""
-import os
+# Авторизация администратора%
+# - Первый запуск: логин admin, пароль из ADMIN_PASSWORD в .env ('changeme123!')
+# - После входа возвращается JWT-токен (24 часа)
+
+import base64
 import hashlib
 import hmac
 import json
-import base64
-import time
-from pathlib import Path
-from fastapi import APIRouter, HTTPException, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, Field
+import os
 import re
-
 import smtplib
+import time
 from email.mime.text import MIMEText
-# from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
-from sqlalchemy import select
-
-from app.db.session import get_session
-
-# _pool = ThreadPoolExecutor(max_workers=2)
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 security = HTTPBearer(auto_error=False)
 
-# Хранилище учётных данных — файл вне кода
+# Хранилище учётных данных
 CREDS_FILE = Path("/app/data/.admin_creds.json")
 SECRET_KEY = os.getenv("SECRET_KEY", "kaza-shop-secret-change-me-in-production-please")
 TOKEN_TTL = 86400  # 24 часа
@@ -41,17 +32,18 @@ def _load_creds() -> dict:
             return json.loads(CREDS_FILE.read_text())
         except Exception:
             pass
-    # Дефолтные данные
+# Дефолтные данные
     default_pass = os.getenv("ADMIN_PASSWORD", "changeme123!")
     if os.getenv("ENV") == "production" and default_pass == "changeme123!":
-        import secrets, string
+        import secrets
+        import string
         default_pass = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
         print(f"WARNING: ADMIN_PASSWORD not set, generated: {default_pass}")
     creds = {
         "login": "admin",
         "password_hash": _hash_password(default_pass),
     }
-    # Сохраняем чтобы при перезапуске пароль не менялся
+# Сохраняем чтобы при перезапуске пароль не менялся
     _save_creds(creds["login"], creds["password_hash"])
     return creds
 
@@ -74,19 +66,19 @@ def _make_token(login: str) -> str:
 
 
 def _verify_token(token: str) -> str | None:
-    """Возвращает login если токен валиден, иначе None"""
+# Возвращает login если токен валиден, иначе None
     try:
         decoded = base64.b64decode(token.encode()).decode()
         parts = decoded.rsplit(":", 2)
         if len(parts) != 3:
             return None
         login, expires, sig = parts
-        # Проверяем подпись
+# Проверяем подпись
         payload = f"{login}:{expires}"
         expected = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(sig, expected):
             return None
-        # Проверяем срок
+# Проверяем срок
         if int(expires) < int(time.time()):
             return None
         return login
@@ -95,7 +87,7 @@ def _verify_token(token: str) -> str | None:
 
 
 def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Dependency: требует валидный JWT. Использовать в защищённых роутах."""
+# Dependency: требует валидный JWT. Использовать в защищённых роутах
     if not credentials:
         raise HTTPException(401, "Not authenticated")
     login = _verify_token(credentials.credentials)
@@ -105,7 +97,7 @@ def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)):
 
 
 def _validate_password(password: str) -> str | None:
-    """Возвращает None если пароль валиден, иначе сообщение об ошибке"""
+# Возвращает None если пароль валиден, иначе сообщение об ошибке
     if len(password) < 8:
         return "Минимум 8 символов"
     if not re.search(r"[A-Za-z]", password):
@@ -115,7 +107,7 @@ def _validate_password(password: str) -> str | None:
     return None
 
 
-# ─── Endpoints ───────────────────────────────────────
+# Endpoints:
 
 class LoginRequest(BaseModel):
     login: str
@@ -147,15 +139,15 @@ async def me(login: str = Depends(require_auth)):
 @router.patch("/credentials")
 async def update_credentials(data: CredentialsUpdate, login: str = Depends(require_auth)):
     creds = _load_creds()
-    # Проверяем текущий пароль
+# Проверяем текущий пароль
     if _hash_password(data.current_password) != creds["password_hash"]:
         raise HTTPException(400, "Неверный текущий пароль")
-    # Валидируем новый пароль
+# Валидируем новый пароль
     err = _validate_password(data.new_password)
     if err:
         raise HTTPException(400, err)
     _save_creds(data.new_login, _hash_password(data.new_password))
-    # Возвращаем новый токен
+# Возвращаем новый токен
     token = _make_token(data.new_login)
     return {"ok": True, "token": token, "login": data.new_login}
 
@@ -168,7 +160,7 @@ def _send_email_sync(to_email: str, subject: str, body: str):
     smtp_from = os.getenv("SMTP_FROM", smtp_user)
 
     if not smtp_host or not smtp_user:
-        # Если SMTP не настроен — пишем в логи
+# Если SMTP не настроен — пишем в логи
         import logging
         logging.getLogger(__name__).warning(
             "SMTP not configured. Recovery email to %s: %s / %s", to_email, subject, body

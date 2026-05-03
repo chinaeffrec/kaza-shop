@@ -1,19 +1,16 @@
 from io import BytesIO
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
+
+import pandas as pd
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import pandas as pd
 
 from app.db.session import get_session
 from app.models.category import Category
-from app.models.subcategory import SubCategory
 from app.models.product import Product
+from app.models.subcategory import SubCategory
 
 router = APIRouter(prefix="/import", tags=["import"])
-
-# Ожидаемые колонки xlsx:
-# category, subcategory, name, price, discount_price, description, characteristics, is_active
-
 
 async def _get_or_create_category(session: AsyncSession, name: str) -> Category:
     name = name.strip()
@@ -50,7 +47,7 @@ async def import_products(file: UploadFile = File(...), session: AsyncSession = 
     except Exception as e:
         raise HTTPException(400, f"Error reading Excel file: {e}")
 
-    # Проверяем обязательные колонки
+# Проверка обязательных колонок
     required = {"category", "subcategory", "name", "price"}
     missing = required - set(df.columns)
     if missing:
@@ -99,7 +96,6 @@ async def import_products(file: UploadFile = File(...), session: AsyncSession = 
                 except Exception:
                     stock = 0
 
-            # Ищем по имени + подкатегория
             res = await session.execute(
                 select(Product).where(Product.name == name, Product.subcategory_id == subcategory.id)
             )

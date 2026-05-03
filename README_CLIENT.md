@@ -4,7 +4,7 @@
 
 ## 1. Что нужно заранее
 
-- VPS на Ubuntu 24.04 (рекомендуется, вне РФ).
+- VPS на Ubuntu 24.04 (рекомендуется вне РФ).
 - Домен (желательно, для HTTPS).
 - Telegram Bot Token от `@BotFather`.
 - Ваш Telegram ID от `@userinfobot`.

@@ -39,21 +39,21 @@ export default function ProductsPage() {
   const [extraPreviews, setExtraPreviews] = useState({})
   const [saving, setSaving]               = useState(false)
   const [hideNoStock, setHideNoStock]     = useState(false)
+  const [selectedIds, setSelectedIds]     = useState([])
+  const PER_PAGE = 20
 
   const load = useCallback(async (pageOverride) => {
-    const page = pageOverride || productsPage
+    const page = pageOverride || 1
     setLoading(true)
     try {
       const [prodRes, cats, cfg] = await Promise.all([
-        api.getProducts(page, 20),
+        api.getProducts(1, 10000),
         api.getCategories(),
         api.getSettings(),
       ])
       setHideNoStock(cfg.hide_out_of_stock || false)
-      setProducts(prodRes.items)
-      setProductsTotal(prodRes.total)
-      setProductsPages(prodRes.pages)
-      setProductsPage(prodRes.page)
+      setProducts(prodRes.items || prodRes || [])
+      setProductsPage(page)
       setCategories(cats)
       const subResults = await Promise.all(
         cats.map(cat => api.getSubcategories(cat.id).then(subs => ({ cat, subs })))
@@ -68,9 +68,9 @@ export default function ProductsPage() {
     } finally {
       setLoading(false)
     }
-  }, [productsPage])
+  }, [])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(1) }, [load])
 
   useEffect(() => {
     if (!filterCat) { setFilterSubOpts([]); setFilterSub(''); return }
@@ -82,6 +82,14 @@ export default function ProductsPage() {
     if (!form._cat_id) { setSubcats([]); return }
     api.getSubcategories(form._cat_id).then(setSubcats).catch(() => setSubcats([]))
   }, [form._cat_id])
+
+  useEffect(() => {
+    setProductsPage(1)
+  }, [search, filterCat, filterSub, onlyNoPhoto])
+
+  useEffect(() => {
+    setSelectedIds([])
+  }, [search, filterCat, filterSub, onlyNoPhoto, productsPage])
 
   function openAdd() {
     setForm(EMPTY)
@@ -167,6 +175,19 @@ export default function ProductsPage() {
     await load()
   }
 
+  async function handleBulkDelete() {
+    if (selectedIds.length === 0) return
+    if (!confirm(`Удалить выбранные товары (${selectedIds.length})?`)) return
+    try {
+      const res = await api.bulkDeleteProducts(selectedIds)
+      toast(`Удалено товаров: ${res.deleted ?? selectedIds.length}`)
+      setSelectedIds([])
+      await load(1)
+    } catch (e) {
+      toast(e.message || 'Ошибка массового удаления')
+    }
+  }
+
   async function handleDeletePhotoSlot(productId, slot) {
     await api.deletePhotoSlot(productId, slot).catch(e => toast(e.message))
     await load()
@@ -183,7 +204,7 @@ export default function ProductsPage() {
     await api.reloadCache()
   }
 
-  const visible = products.filter(p => {
+  const filtered = products.filter(p => {
     if (onlyNoPhoto && p.has_image) return false
     if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false
     if (filterCat) {
@@ -194,13 +215,34 @@ export default function ProductsPage() {
     return true
   })
 
+  const pages = Math.max(1, Math.ceil(filtered.length / PER_PAGE))
+  const safePage = Math.min(productsPage, pages)
+  const start = (safePage - 1) * PER_PAGE
+  const visible = filtered.slice(start, start + PER_PAGE)
+  const visibleIds = visible.map(p => p.id)
+  const selectedVisibleCount = selectedIds.filter(id => visibleIds.includes(id)).length
+  const allVisibleSelected = visible.length > 0 && selectedVisibleCount === visible.length
+
+  useEffect(() => {
+    setProductsTotal(filtered.length)
+    setProductsPages(pages)
+    if (productsPage !== safePage) setProductsPage(safePage)
+  }, [filtered.length, pages, productsPage, safePage])
+
   if (loading) return <p className={s.msg}>Загрузка...</p>
 
   return (
     <div>
       <div className={s.toolbar}>
         <h1 className={s.title}>Товары <span className={s.count}>{productsTotal}</span></h1>
-        <button className={s.btnAdd} onClick={openAdd}>+ Добавить</button>
+        <div style={{display:'flex', gap:8}}>
+          {selectedIds.length > 0 && (
+            <button className={s.btnDel} onClick={handleBulkDelete}>
+              🗑 Удалить выбранные ({selectedIds.length})
+            </button>
+          )}
+          <button className={s.btnAdd} onClick={openAdd}>+ Добавить</button>
+        </div>
       </div>
 
       <div className={s.filters}>
@@ -224,12 +266,12 @@ export default function ProductsPage() {
 
       {productsPages > 1 && (
         <div style={{display:'flex', gap:8, alignItems:'center', marginBottom:12, fontSize:13, color:'#555'}}>
-          <button onClick={() => load(productsPage - 1)} disabled={productsPage <= 1}
+          <button onClick={() => setProductsPage(p => Math.max(1, p - 1))} disabled={productsPage <= 1}
             style={{padding:'4px 12px', borderRadius:6, border:'1px solid #ddd', background:'#fff', cursor:productsPage<=1?'default':'pointer'}}>
             ←
           </button>
           <span>Стр. {productsPage} из {productsPages} (всего {productsTotal})</span>
-          <button onClick={() => load(productsPage + 1)} disabled={productsPage >= productsPages}
+          <button onClick={() => setProductsPage(p => Math.min(productsPages, p + 1))} disabled={productsPage >= productsPages}
             style={{padding:'4px 12px', borderRadius:6, border:'1px solid #ddd', background:'#fff', cursor:productsPage>=productsPages?'default':'pointer'}}>
             →
           </button>
@@ -240,6 +282,19 @@ export default function ProductsPage() {
         <table className={s.table}>
           <thead>
             <tr>
+              <th>
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedIds(prev => Array.from(new Set([...prev, ...visibleIds])))
+                    } else {
+                      setSelectedIds(prev => prev.filter(id => !visibleIds.includes(id)))
+                    }
+                  }}
+                />
+              </th>
               <th>Фото</th><th>Название</th><th>Категория</th><th>Подкатегория</th>
               <th>Цена</th><th>Цена со скидкой</th><th>Остаток</th><th>Активен</th><th></th>
             </tr>
@@ -247,6 +302,19 @@ export default function ProductsPage() {
           <tbody>
             {visible.map(p => (
               <tr key={p.id} className={!p.has_image ? s.noPhotoRow : ''}>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(p.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedIds(prev => prev.includes(p.id) ? prev : [...prev, p.id])
+                      } else {
+                        setSelectedIds(prev => prev.filter(id => id !== p.id))
+                      }
+                    }}
+                  />
+                </td>
                 <td>
                   {p.image_url
                     ? <img src={`${api.BASE}${p.image_url}?v=${p.updated_at || ''}`}

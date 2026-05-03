@@ -179,14 +179,6 @@ export default function StatsPage({ saved, onSave }) {
       {tab === 'products' && (
         loading ? <p className={s.msg}>Загрузка...</p> : (
           <>
-            <div style={{marginBottom: 12}}>
-              <button className={s.btnApply} style={{background:'#43a047'}}
-                onClick={() => api.exportStats(dateFrom, dateTo).catch(e => toast('Ошибка экспорта: ' + e.message, 'error'))}
-              >
-                📥 Экспорт в Excel
-              </button>
-            </div>
-
             {productsSummary && (
               <div className={s.summary} style={{marginBottom: 16}}>
                 <div className={s.card}>
@@ -211,6 +203,14 @@ export default function StatsPage({ saved, onSave }) {
                 </div>
               </div>
             )}
+
+            <div style={{marginBottom: 12}}>
+              <button className={s.btnApply} style={{background:'#43a047'}}
+                onClick={() => api.exportStats(dateFrom, dateTo).catch(e => toast('Ошибка экспорта: ' + e.message, 'error'))}
+              >
+                📥 Экспорт в Excel
+              </button>
+            </div>
 
             <table className={s.table}>
               <thead><tr>
