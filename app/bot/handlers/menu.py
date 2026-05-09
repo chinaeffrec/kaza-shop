@@ -71,6 +71,18 @@ def _fmt_price(price: int | float) -> str:
     return f"{int(price):,} ₽".replace(",", " ")
 
 
+async def _get_public_settings() -> dict:
+    """Получить публичные настройки — не требует токена."""
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            r = await client.get(f"{BASE_URL}/settings/public")
+            if r.status_code == 200:
+                return r.json()
+    except Exception:
+        pass
+    return {}
+
+
 @router.callback_query(F.data == "menu_catalog")
 async def open_catalog(callback: CallbackQuery):
     user_id = callback.from_user.id
@@ -83,11 +95,14 @@ async def open_catalog(callback: CallbackQuery):
 
 @router.callback_query(F.data == "menu_cart")
 async def open_cart(callback: CallbackQuery):
-    import httpx
     user_id = callback.from_user.id
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"{BASE_URL}/cart/{user_id}")
-    data = response.json()
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(f"{BASE_URL}/cart/{user_id}")
+        data = response.json()
+    except Exception:
+        await callback.answer("❌ Ошибка соединения с сервером", show_alert=True)
+        return
 
     if not data.get("items"):
         await _replace_with_text(
@@ -109,11 +124,16 @@ async def open_cart(callback: CallbackQuery):
 
 @router.callback_query(F.data == "menu_order")
 async def open_order_status(callback: CallbackQuery):
-    import httpx
     user_id = callback.from_user.id
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"{BASE_URL}/orders/user/{user_id}")
-    orders = response.json()
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(f"{BASE_URL}/orders/user/{user_id}")
+        orders = response.json()
+        if not isinstance(orders, list):
+            orders = []
+    except Exception:
+        await callback.answer("❌ Ошибка соединения с сервером", show_alert=True)
+        return
 
     active = [o for o in orders if o["status"] not in ("delivered", "cancelled", "returned")]
     done = [o for o in orders if o["status"] in ("delivered",)]
@@ -140,7 +160,9 @@ async def open_order_status(callback: CallbackQuery):
 
         kb_rows = []
         if done:
-            kb_rows.append([InlineKeyboardButton(text=f"📋 История заказов ({len(done)})", callback_data="order_history")])
+            kb_rows.append([InlineKeyboardButton(
+                text=f"📋 История заказов ({len(done)})", callback_data="order_history"
+            )])
         kb_rows.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="menu_back")])
         kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
@@ -150,11 +172,17 @@ async def open_order_status(callback: CallbackQuery):
 
 @router.callback_query(F.data == "order_history")
 async def order_history(callback: CallbackQuery):
-    import httpx
     user_id = callback.from_user.id
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"{BASE_URL}/orders/user/{user_id}")
-    orders = response.json()
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(f"{BASE_URL}/orders/user/{user_id}")
+        orders = response.json()
+        if not isinstance(orders, list):
+            orders = []
+    except Exception:
+        await callback.answer("❌ Ошибка соединения с сервером", show_alert=True)
+        return
+
     done = [o for o in orders if o["status"] == "delivered"]
 
     if not done:
@@ -171,8 +199,7 @@ async def order_history(callback: CallbackQuery):
         text = "\n\n".join(lines)
 
     await _replace_with_text(
-        callback.message,
-        text,
+        callback.message, text,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Мои заказы", callback_data="menu_order")]
         ]),
@@ -183,15 +210,8 @@ async def order_history(callback: CallbackQuery):
 
 @router.callback_query(F.data == "menu_question")
 async def open_question(callback: CallbackQuery):
-    import httpx
-    contact = "@support"
-    try:
-        async with httpx.AsyncClient(timeout=2) as client:
-            r = await client.get(f"{BASE_URL}/settings/")
-            if r.status_code == 200:
-                contact = r.json().get("seller_contact") or contact
-    except Exception:
-        pass
+    cfg = await _get_public_settings()
+    contact = cfg.get("seller_contact") or "@support"
     await _replace_with_text(
         callback.message,
         f"💬 <b>Написать нам</b>\n\nСвяжитесь с нами напрямую:\n{contact}",
@@ -205,17 +225,10 @@ async def open_question(callback: CallbackQuery):
 
 @router.callback_query(F.data == "menu_back")
 async def menu_back(callback: CallbackQuery, state: FSMContext):
-    import httpx
     navigation.reset(callback.from_user.id)
     await state.clear()
-    welcome_text = "👋 Добро пожаловать!\n\nВыберите действие:"
-    try:
-        async with httpx.AsyncClient(timeout=2) as client:
-            r = await client.get(f"{BASE_URL}/settings/")
-            if r.status_code == 200:
-                welcome_text = r.json().get("welcome_message") or welcome_text
-    except Exception:
-        pass
+    cfg = await _get_public_settings()
+    welcome_text = cfg.get("welcome_message") or "👋 Добро пожаловать!\n\nВыберите действие:"
     await _replace_with_text(callback.message, welcome_text, reply_markup=main_menu())
     await callback.answer()
 
@@ -295,32 +308,38 @@ async def checkout_address_non_text(message: Message):
 
 
 async def _finalize_order(message, state: FSMContext, address: str):
-
     data = await state.get_data()
     comment = data.get("comment", "")
     user_id = message.chat.id
     await state.clear()
 
-    async with httpx.AsyncClient() as client:
-        cart_resp = await client.get(f"{BASE_URL}/cart/{user_id}")
-    cart_data = cart_resp.json()
-    total = cart_data.get("total", 0)
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            cart_resp = await client.get(f"{BASE_URL}/cart/{user_id}")
+        cart_data = cart_resp.json()
+        total = cart_data.get("total", 0)
+    except Exception:
+        total = 0
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{BASE_URL}/orders/",
-            json={
-                "user_id": user_id,
-                "comment": comment,
-                "delivery_address": address,
-                "user_first_name": message.chat.first_name or "",
-                "user_last_name": message.chat.last_name or "",
-                "user_username": message.chat.username or "",
-            }
-        )
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                f"{BASE_URL}/orders/",
+                json={
+                    "user_id": user_id,
+                    "comment": comment,
+                    "delivery_address": address,
+                    "user_first_name": message.chat.first_name or "",
+                    "user_last_name": message.chat.last_name or "",
+                    "user_username": message.chat.username or "",
+                }
+            )
+    except Exception:
+        await message.answer("❌ Ошибка соединения. Попробуйте ещё раз.", reply_markup=main_menu())
+        return
 
     if response.status_code != 200:
-        await message.answer("❌ Ошибка при оформлении заказа.", reply_markup=main_menu())
+        await message.answer("❌ Ошибка при оформлении заказа. Попробуйте ещё раз.", reply_markup=main_menu())
         return
 
     order = response.json()
@@ -339,32 +358,23 @@ async def _finalize_order(message, state: FSMContext, address: str):
         [InlineKeyboardButton(text="🏠 В меню", callback_data="menu_back")],
     ])
 
-    qr_url = None
-    qr_comment = ""
-    try:
-        async with httpx.AsyncClient(timeout=2) as client:
-            r = await client.get(f"{BASE_URL}/settings/")
-            if r.status_code == 200:
-                cfg = r.json()
-                qr_url = cfg.get("payment_qr_url")
-                qr_comment = cfg.get("payment_qr_comment", "").strip()
-    except Exception:
-        pass
+    # QR-код оплаты из публичных настроек
+    cfg = await _get_public_settings()
+    qr_url = cfg.get("payment_qr_url")
+    qr_comment = cfg.get("payment_qr_comment", "").strip()
 
     if qr_url:
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 img_resp = await client.get(f"{BASE_URL}{qr_url}")
-                if img_resp.status_code == 200 and img_resp.content and len(img_resp.content) > 100:
-                    caption_for_qr = caption + f"\n📱 <b>Оплатите {_fmt_price(total)} по QR-коду:</b>"
+                if img_resp.status_code == 200 and len(img_resp.content) > 100:
+                    caption_qr = caption + f"\n📱 <b>Оплатите {_fmt_price(total)} по QR-коду</b>"
                     if qr_comment:
-                        caption_for_qr += f"\n{qr_comment}"
+                        caption_qr += f"\n{qr_comment}"
                     qr_photo = BufferedInputFile(img_resp.content, filename="qr.png")
                     await message.answer_photo(
-                        photo=qr_photo,
-                        caption=caption_for_qr,
-                        reply_markup=kb,
-                        parse_mode="HTML",
+                        photo=qr_photo, caption=caption_qr,
+                        reply_markup=kb, parse_mode="HTML",
                     )
                     return
         except Exception:
@@ -373,29 +383,20 @@ async def _finalize_order(message, state: FSMContext, address: str):
     caption += "\nДля оплаты свяжитесь с продавцом."
     await message.answer(caption, reply_markup=kb, parse_mode="HTML")
 
+
 @router.callback_query(F.data == "menu_refresh")
 async def menu_refresh(callback: CallbackQuery, state: FSMContext):
     navigation.reset(callback.from_user.id)
     await state.clear()
-
-    welcome_text = "👋 Добро пожаловать!\n\nВыберите действие:"
-    try:
-        async with httpx.AsyncClient(timeout=2) as client:
-            r = await client.get(f"{BASE_URL}/settings/")
-            if r.status_code == 200:
-                welcome_text = r.json().get("welcome_message") or welcome_text
-    except Exception:
-        pass
-
+    cfg = await _get_public_settings()
+    welcome_text = cfg.get("welcome_message") or "👋 Добро пожаловать!\n\nВыберите действие:"
     await clear_and_reset(callback.from_user.id, callback.bot)
-
     sent = await callback.bot.send_message(
-        callback.from_user.id,
-        welcome_text,
-        reply_markup=main_menu(),
+        callback.from_user.id, welcome_text, reply_markup=main_menu(),
     )
     track(callback.from_user.id, sent.message_id)
     await callback.answer("Чат очищен")
+
 
 @router.callback_query(F.data.startswith("noop_"))
 async def noop(callback: CallbackQuery):

@@ -24,6 +24,13 @@ export default function SettingsPage({ onSaved, adminLogin }) {
   const [pwSaving, setPwSaving] = useState(false)
   const [pwMsg, setPwMsg]     = useState('')
 
+  const [dbExporting, setDbExporting]       = useState(false)
+  const [dbImporting, setDbImporting]       = useState(false)
+  const [dbImportMsg, setDbImportMsg]       = useState('')
+  const [mediaExporting, setMediaExporting] = useState(false)
+  const [mediaImporting, setMediaImporting] = useState(false)
+  const [mediaImportMsg, setMediaImportMsg] = useState('')
+
   const [logs, setLogs]         = useState([])
   const [logsOpen, setLogsOpen] = useState(false)
   const [logsLoading, setLogsLoading] = useState(false)
@@ -126,20 +133,16 @@ export default function SettingsPage({ onSaved, adminLogin }) {
       lines.push(`[${ts()}] ✅ Сервис работает — статус: ${health.status}`)
     } catch { lines.push(`[${ts()}] ❌ Сервис недоступен`) }
     try {
-      const db = await fetch(`${api.BASE}/db-test`).then(r => r.json())
-      lines.push(`[${ts()}] 🗄 База данных: ${db.db==='ok'?'✅ подключена':'❌ ' + db.detail}`)
-    } catch { lines.push(`[${ts()}] 🗄 База данных: ⚠️ нет ответа`) }
-    try {
-      const ordersRes = await api.getOrders('', 1, 10000)
-      const orders = ordersRes.items || ordersRes
-      const byStatus = orders.reduce((a,o)=>{ a[o.status]=(a[o.status]||0)+1; return a },{})
-      lines.push(`[${ts()}] 🧾 Заказов: ${orders.length} — ${Object.entries(byStatus).map(([k,v])=>`${k}:${v}`).join(', ')||'нет'}`)
+      const dash = await api.getDashboard()
+      const byStatus = (dash.orders_by_status || []).map(s => `${s.label}: ${s.count}`).join(', ')
+      lines.push(`[${ts()}] 🧾 Заказов всего: ${dash.total_orders} — ${byStatus || 'нет'}`)
     } catch { lines.push(`[${ts()}] 🧾 Заказы: ⚠️ ошибка`) }
     try {
-      const prods = await api.getProducts()
-      const prodItems = prods.items || prods
-      const noPhoto = prodItems.filter(p=>!p.has_image).length
-      lines.push(`[${ts()}] 📦 Товаров: ${prodItems.length}, без фото: ${noPhoto}`)
+      const [allProds, noPhotoProds] = await Promise.all([
+        api.getProducts(1, 1),
+        api.getProducts(1, 1, { has_image: false }),
+      ])
+      lines.push(`[${ts()}] 📦 Товаров: ${allProds.total}, без фото: ${noPhotoProds.total}`)
     } catch { lines.push(`[${ts()}] 📦 Товары: ⚠️ ошибка`) }
     lines.push(`[${ts()}] 🕐 Проверено: ${new Date().toLocaleString()}`)
     setLogs(lines); setLogsLoading(false)
@@ -336,6 +339,123 @@ export default function SettingsPage({ onSaved, adminLogin }) {
         <button className={s.btnSave} onClick={saveCredentials} disabled={pwSaving}>
           {pwSaving ? 'Сохранение...' : 'Изменить данные входа'}
         </button>
+      </section>
+
+      {/* База данных */}
+      <section className={s.section}>
+        <h2 className={s.sectionTitle}>Перенос данных</h2>
+
+        <p className={s.hint} style={{marginBottom: 4}}>
+          Для полного переноса на другой сервер нужны <b>оба файла</b>: база данных + медиафайлы.
+          Сначала экспортируйте оба, затем на новом сервере импортируйте в том же порядке.
+        </p>
+        <p style={{fontSize: 12, color: '#e67e22', marginBottom: 16, padding: '8px 12px',
+          background: '#fffbf0', border: '1px solid #f0d080', borderRadius: 6}}>
+          ⚠️ Учётные данные администратора (логин/пароль) хранятся отдельно и <b>не переносятся</b>.
+          На новом сервере используйте пароль из его файла .env.
+        </p>
+
+        {/* Шаг 1: База данных */}
+        <h3 style={{fontSize: 14, fontWeight: 600, color: '#333', marginBottom: 8}}>
+          Шаг 1 — База данных (товары, заказы, настройки, FAQ)
+        </h3>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
+          <button className={s.btnSave} disabled={dbExporting}
+            onClick={async () => {
+              setDbExporting(true)
+              try { await api.exportDb(); toast('База данных экспортирована', 'success') }
+              catch (e) { toast(e.message, 'error') }
+              finally { setDbExporting(false) }
+            }}>
+            {dbExporting ? 'Подготовка...' : '⬇️ Скачать базу данных (.json)'}
+          </button>
+
+          <label style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '8px 16px', borderRadius: 8, cursor: 'pointer',
+            background: '#f5f5f5', border: '1px solid #ddd',
+            fontSize: 14, fontWeight: 500, color: '#333',
+            opacity: dbImporting ? 0.6 : 1,
+            pointerEvents: dbImporting ? 'none' : 'auto',
+          }}>
+            {dbImporting ? '⏳ Импорт...' : '⬆️ Загрузить базу данных (.json)'}
+            <input type="file" accept=".json" style={{ display: 'none' }}
+              onChange={async e => {
+                const file = e.target.files?.[0]; e.target.value = ''
+                if (!file) return
+                if (!confirm('⚠️ Все текущие данные (товары, заказы, настройки, FAQ) будут заменены данными из файла.\n\nПродолжить?')) return
+                setDbImporting(true); setDbImportMsg('')
+                try {
+                  const res = await api.importDb(file)
+                  const total = Object.values(res.counts || {}).reduce((a, b) => a + b, 0)
+                  setDbImportMsg(`✅ База восстановлена. Записей: ${total}`)
+                  toast('База данных успешно восстановлена', 'success')
+                } catch (e) {
+                  setDbImportMsg(`❌ ${e.message}`); toast(e.message, 'error')
+                } finally { setDbImporting(false) }
+              }} />
+          </label>
+        </div>
+        {dbImportMsg && (
+          <p style={{fontSize:13, padding:'8px 12px', borderRadius:6, marginBottom:8,
+            background: dbImportMsg.startsWith('✅') ? '#f0fff4' : '#fff0f0',
+            border:`1px solid ${dbImportMsg.startsWith('✅') ? '#b2dfdb' : '#ffcdd2'}`, color:'#333'}}>
+            {dbImportMsg}
+          </p>
+        )}
+
+        {/* Шаг 2: Медиафайлы */}
+        <h3 style={{fontSize: 14, fontWeight: 600, color: '#333', marginBottom: 4, marginTop: 20}}>
+          Шаг 2 — Медиафайлы (фото товаров, логотип, печать, QR-код)
+        </h3>
+        <p style={{fontSize: 12, color: '#888', marginBottom: 8}}>
+          Без медиафайлов изображения товаров не будут отображаться на новом сервере.
+        </p>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
+          <button className={s.btnSave} disabled={mediaExporting}
+            onClick={async () => {
+              setMediaExporting(true)
+              try { await api.exportMedia(); toast('Медиафайлы экспортированы', 'success') }
+              catch (e) { toast(e.message, 'error') }
+              finally { setMediaExporting(false) }
+            }}>
+            {mediaExporting ? 'Архивирование...' : '⬇️ Скачать медиафайлы (.zip)'}
+          </button>
+
+          <label style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '8px 16px', borderRadius: 8, cursor: 'pointer',
+            background: '#f5f5f5', border: '1px solid #ddd',
+            fontSize: 14, fontWeight: 500, color: '#333',
+            opacity: mediaImporting ? 0.6 : 1,
+            pointerEvents: mediaImporting ? 'none' : 'auto',
+          }}>
+            {mediaImporting ? '⏳ Загрузка...' : '⬆️ Загрузить медиафайлы (.zip)'}
+            <input type="file" accept=".zip" style={{ display: 'none' }}
+              onChange={async e => {
+                const file = e.target.files?.[0]; e.target.value = ''
+                if (!file) return
+                setMediaImporting(true); setMediaImportMsg('')
+                try {
+                  const res = await api.importMedia(file)
+                  setMediaImportMsg(`✅ Загружено файлов: ${res.files}`)
+                  toast(`Медиафайлы загружены (${res.files} шт.)`, 'success')
+                } catch (e) {
+                  setMediaImportMsg(`❌ ${e.message}`); toast(e.message, 'error')
+                } finally { setMediaImporting(false) }
+              }} />
+          </label>
+        </div>
+        {mediaImportMsg && (
+          <p style={{fontSize:13, padding:'8px 12px', borderRadius:6,
+            background: mediaImportMsg.startsWith('✅') ? '#f0fff4' : '#fff0f0',
+            border:`1px solid ${mediaImportMsg.startsWith('✅') ? '#b2dfdb' : '#ffcdd2'}`, color:'#333'}}>
+            {mediaImportMsg}
+          </p>
+        )}
+        <p style={{ fontSize: 11, color: '#aaa', marginTop: 8 }}>
+          После импорта нажмите «Сбросить кэш каталога» в разделе «Системный журнал», чтобы бот показал актуальные данные.
+        </p>
       </section>
 
       {/* Системный журнал */}

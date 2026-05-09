@@ -1,46 +1,45 @@
 import logging
+import logging.handlers
 import os
 import sys
-from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 
-def configure_logging(service_name: str) -> Path:
-    logs_dir = Path(__file__).resolve().parent / "media" / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
+def configure_logging(name: str = "app") -> None:
+    """Настраивает логирование: консоль + ротируемый файл."""
+    try:
+        from app.core.config import get_settings
+        level_name = get_settings().log_level.upper()
+    except Exception:
+        level_name = os.getenv("LOG_LEVEL", "INFO").upper()
 
-    level_name = os.getenv("LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
+    fmt = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+    formatter = logging.Formatter(fmt)
 
-    formatter = logging.Formatter(
-        fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    root = logging.getLogger()
+    root.setLevel(level)
 
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setLevel(level)
-    stream_handler.setFormatter(formatter)
+    # Консоль
+    console = logging.StreamHandler(sys.stdout)
+    console.setFormatter(formatter)
+    root.addHandler(console)
 
-    file_handler = TimedRotatingFileHandler(
-        logs_dir / f"{service_name}.log",
-        when="midnight",
-        interval=1,
-        backupCount=1,
-        encoding="utf-8",
-    )
-    file_handler.setLevel(level)
-    file_handler.setFormatter(formatter)
+    # Файл с ротацией
+    log_dir = Path("/app/logs")
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_dir / f"{name}.log",
+            maxBytes=10 * 1024 * 1024,  # 10 MB
+            backupCount=5,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(formatter)
+        root.addHandler(file_handler)
+    except Exception:
+        pass  # Если /app/logs недоступен — только консоль
 
-    root_logger = logging.getLogger()
-    root_logger.handlers.clear()
-    root_logger.setLevel(level)
-    root_logger.addHandler(stream_handler)
-    root_logger.addHandler(file_handler)
-
-    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
-        logger = logging.getLogger(logger_name)
-        logger.handlers.clear()
-        logger.propagate = True
-        logger.setLevel(level)
-
-    return logs_dir
+    # Приглушаем шумные библиотеки
+    for noisy in ("sqlalchemy.engine", "aiogram", "httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)

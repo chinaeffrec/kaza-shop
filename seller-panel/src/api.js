@@ -1,4 +1,6 @@
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// Пустая строка = относительные URL → работает через nginx на любом сервере
+// Для локальной разработки задай VITE_API_URL=http://localhost:8000 в .env
+const BASE = import.meta.env.VITE_API_URL ?? ''
 
 function buildQuery(params) {
   const query = new URLSearchParams()
@@ -28,7 +30,10 @@ async function req(method, path, body, isFormData = false) {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || 'Request failed')
+    const detail = Array.isArray(err.detail)
+      ? err.detail.map(d => d.msg || JSON.stringify(d)).join('; ')
+      : (err.detail || 'Request failed')
+    throw new Error(String(detail))
   }
   return res.json()
 }
@@ -78,12 +83,14 @@ export const api = {
   updateCredentials: (d) => req('PATCH', '/auth/credentials', d),
 
   // Catalog
-  getCategories:    () => req('GET', '/catalog/categories'),
-  getSubcategories: (id) => req('GET', `/catalog/categories/${id}/subcategories`),
-  reloadCache:      () => req('POST', '/catalog/cache/reload'),
+  getCategories:       () => req('GET', '/catalog/categories'),
+  getAllSubcategories:  () => req('GET', '/catalog/subcategories'),
+  getSubcategories:    (id) => req('GET', `/catalog/categories/${id}/subcategories`),
+  reloadCache:         () => req('POST', '/catalog/cache/reload'),
 
   // Products
-  getProducts:      (page = 1, perPage = 20) => req('GET', `/products/${buildQuery({ page, per_page: perPage })}`),
+  getProducts: (page = 1, perPage = 20, filters = {}) =>
+    req('GET', `/products/${buildQuery({ page, per_page: perPage, ...filters })}`),
   createProduct:    (d) => req('POST', '/products/', d),
   updateProduct:    (id, d) => req('PATCH', `/products/${id}`, d),
   deleteProduct:    (id) => req('DELETE', `/products/${id}`),
@@ -110,7 +117,7 @@ export const api = {
   exportDashboard: (from, to) => {
     const token = localStorage.getItem('admin_token')
     const qs = buildQuery({ date_from: from || null, date_to: to || null })
-    const url = `${BASE}/stats/dashboard/export${qs}`
+    const url = `${BASE}/stats/export${qs}`
     return fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
       .then(r => {
         if (!r.ok) throw new Error('Export failed')
@@ -147,6 +154,10 @@ export const api = {
   getSettings:    () => req('GET', '/settings/'),
   updateSettings: (d) => req('PATCH', '/settings/', d),
   downloadLogs:   () => downloadFile('/settings/logs/download', 'kaza-shop-logs.zip'),
+  exportDb:    () => downloadFile(`/settings/db-export`,    `kaza_db_${new Date().toISOString().slice(0,10)}.json`),
+  importDb:    (file) => uploadFile('/settings/db-import',    file),
+  exportMedia: () => downloadFile(`/settings/media-export`, `kaza_media_${new Date().toISOString().slice(0,10)}.zip`),
+  importMedia: (file) => uploadFile('/settings/media-import', file),
 
   // FAQ
   getFaq:    () => req('GET', '/faq/'),

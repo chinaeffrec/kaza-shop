@@ -1,93 +1,213 @@
-# Авторизация администратора%
-# - Первый запуск: логин admin, пароль из ADMIN_PASSWORD в .env ('changeme123!')
-# - После входа возвращается JWT-токен (24 часа)
-
-import base64
+"""
+Авторизация администратора.
+- bcrypt (rounds=12) для паролей
+- PyJWT HS256, TTL 24 часа
+- Rate limiting: 5 попыток / 60 сек с одного IP (Redis; fallback — in-memory)
+"""
 import hashlib
-import hmac
 import json
+import logging
 import os
 import re
-import smtplib
 import time
-from email.mime.text import MIMEText
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+import bcrypt
+import jwt
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field
 
+from app.api.schemas.auth import (
+    CredentialsUpdate, CredentialsUpdateResponse,
+    LoginRequest, LoginResponse, MeResponse,
+)
+from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 security = HTTPBearer(auto_error=False)
 
-# Хранилище учётных данных
+_cfg = get_settings()
 CREDS_FILE = Path("/app/data/.admin_creds.json")
-SECRET_KEY = os.getenv("SECRET_KEY", "kaza-shop-secret-change-me-in-production-please")
 TOKEN_TTL = 86400  # 24 часа
+
+# ── Rate limiting ──────────────────────────────────────────────────────────────
+_login_attempts: dict[str, list[float]] = {}  # fallback: используется если Redis недоступен
+_RATE_LIMIT_MAX = 5
+_RATE_LIMIT_WINDOW = 60
+_redis_client = None
+
+
+def _get_redis():
+    global _redis_client
+    if _redis_client is None:
+        try:
+            import redis.asyncio as aioredis
+            _redis_client = aioredis.from_url(_cfg.redis_url, decode_responses=True)
+        except Exception as e:
+            logger.warning("Redis rate limiter unavailable, using in-memory fallback: %s", e)
+    return _redis_client
+
+
+async def _check_rate_limit(ip: str) -> None:
+    redis = _get_redis()
+    if redis is not None:
+        try:
+            key = f"rl:login:{ip}"
+            count = await redis.incr(key)
+            if count == 1:
+                await redis.expire(key, _RATE_LIMIT_WINDOW)
+            if count > _RATE_LIMIT_MAX:
+                retry_after = max(await redis.ttl(key), 1)
+                raise HTTPException(
+                    429, f"Слишком много попыток. Повторите через {retry_after} сек.",
+                    headers={"Retry-After": str(retry_after)},
+                )
+            return
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning("Redis rate limit error, falling back to in-memory: %s", e)
+
+    # In-memory fallback
+    now = time.time()
+    attempts = [t for t in _login_attempts.get(ip, []) if now - t < _RATE_LIMIT_WINDOW]
+    if len(attempts) >= _RATE_LIMIT_MAX:
+        retry_after = int(_RATE_LIMIT_WINDOW - (now - attempts[0]))
+        raise HTTPException(
+            429, f"Слишком много попыток. Повторите через {retry_after} сек.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    attempts.append(now)
+    _login_attempts[ip] = attempts
+
+
+async def _clear_rate_limit(ip: str) -> None:
+    redis = _get_redis()
+    if redis is not None:
+        try:
+            await redis.delete(f"rl:login:{ip}")
+            return
+        except Exception as e:
+            logger.warning("Redis clear rate limit error: %s", e)
+    _login_attempts.pop(ip, None)
+
+
+# ── Пароли ────────────────────────────────────────────────────────────────────
+def _hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
+
+
+def _verify_password(password: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode(), hashed.encode())
+    except Exception:
+        return False
+
+
+def _env_password_fingerprint() -> str:
+    """Хеш текущего ADMIN_PASSWORD из env — для детекции изменений."""
+    return hashlib.sha256(_cfg.admin_password.encode()).hexdigest()[:16]
 
 
 def _load_creds() -> dict:
+    """
+    Загружает учётные данные. Логика:
+    1. Если файла нет — создаём из ADMIN_PASSWORD.
+    2. Если файл есть, но ADMIN_PASSWORD в env изменился (fingerprint не совпадает) — перезаписываем.
+    3. Если файл есть и пароль не менялся — используем файл.
+    """
+    env_pass = _cfg.admin_password
+    env_fp = _env_password_fingerprint()
+
     if CREDS_FILE.exists():
         try:
-            return json.loads(CREDS_FILE.read_text())
-        except Exception:
-            pass
-# Дефолтные данные
-    default_pass = os.getenv("ADMIN_PASSWORD", "changeme123!")
-    if os.getenv("ENV") == "production" and default_pass == "changeme123!":
-        import secrets
-        import string
-        default_pass = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
-        print(f"WARNING: ADMIN_PASSWORD not set, generated: {default_pass}")
+            data = json.loads(CREDS_FILE.read_text())
+            stored_hash = data.get("password_hash", "")
+            stored_fp = data.get("env_fingerprint", "")
+
+            # Пароль в .env изменился — принудительно перезаписываем
+            if stored_fp and stored_fp != env_fp:
+                logger.info("ADMIN_PASSWORD changed in env, updating credentials")
+                return _create_creds(env_pass, env_fp)
+
+            # Валидный bcrypt-хеш и fingerprint совпадает — всё ок
+            if stored_hash.startswith("$2") and stored_fp == env_fp:
+                return data
+
+            # Старый формат (sha256 или без fingerprint) — мигрируем
+            if stored_hash.startswith("$2") and not stored_fp:
+                logger.info("Migrating creds: adding env_fingerprint")
+                data["env_fingerprint"] = env_fp
+                _save_creds_data(data)
+                return data
+
+            logger.warning("Invalid creds format, recreating from env")
+        except Exception as e:
+            logger.warning("Failed to read creds file: %s, recreating", e)
+
+    return _create_creds(env_pass, env_fp)
+
+
+def _create_creds(password: str, fingerprint: str) -> dict:
+    if not password:
+        import secrets, string
+        password = "".join(
+            secrets.choice(string.ascii_letters + string.digits + "!@#$%")
+            for _ in range(20)
+        )
+        logger.warning("ADMIN_PASSWORD not set, generated temporary password. Set it in .env!")
+
     creds = {
         "login": "admin",
-        "password_hash": _hash_password(default_pass),
+        "password_hash": _hash_password(password),
+        "env_fingerprint": fingerprint,
     }
-# Сохраняем чтобы при перезапуске пароль не менялся
-    _save_creds(creds["login"], creds["password_hash"])
+    _save_creds_data(creds)
     return creds
 
 
-def _save_creds(login: str, password_hash: str):
+def _save_creds_data(data: dict) -> None:
     CREDS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CREDS_FILE.write_text(json.dumps({"login": login, "password_hash": password_hash}))
+    CREDS_FILE.write_text(json.dumps(data))
+    os.chmod(CREDS_FILE, 0o600)
 
 
-def _hash_password(password: str) -> str:
-    salt = "kaza2024"
-    return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
+def _save_creds(login: str, password_hash: str) -> None:
+    """Сохранить новые учётные данные после смены пароля через API."""
+    data = {
+        "login": login,
+        "password_hash": password_hash,
+        # При смене через API fingerprint сбрасываем — пароль теперь независим от env
+        "env_fingerprint": "",
+    }
+    _save_creds_data(data)
 
 
+# ── JWT ───────────────────────────────────────────────────────────────────────
 def _make_token(login: str) -> str:
-    payload = f"{login}:{int(time.time()) + TOKEN_TTL}"
-    sig = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
-    token_data = base64.b64encode(f"{payload}:{sig}".encode()).decode()
-    return token_data
+    if not _cfg.secret_key:
+        raise RuntimeError("SECRET_KEY must be set in environment")
+    now = datetime.now(timezone.utc)
+    payload = {"sub": login, "iat": now, "exp": now + timedelta(seconds=TOKEN_TTL)}
+    return jwt.encode(payload, _cfg.secret_key, algorithm="HS256")
 
 
 def _verify_token(token: str) -> str | None:
-# Возвращает login если токен валиден, иначе None
+    if not _cfg.secret_key:
+        return None
     try:
-        decoded = base64.b64decode(token.encode()).decode()
-        parts = decoded.rsplit(":", 2)
-        if len(parts) != 3:
-            return None
-        login, expires, sig = parts
-# Проверяем подпись
-        payload = f"{login}:{expires}"
-        expected = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, expected):
-            return None
-# Проверяем срок
-        if int(expires) < int(time.time()):
-            return None
-        return login
-    except Exception:
+        payload = jwt.decode(token, _cfg.secret_key, algorithms=["HS256"])
+        return payload.get("sub")
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
         return None
 
 
-def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)):
-# Dependency: требует валидный JWT. Использовать в защищённых роутах
+# ── Dependency ────────────────────────────────────────────────────────────────
+def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
     if not credentials:
         raise HTTPException(401, "Not authenticated")
     login = _verify_token(credentials.credentials)
@@ -96,10 +216,10 @@ def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)):
     return login
 
 
+# ── Валидация пароля ──────────────────────────────────────────────────────────
 def _validate_password(password: str) -> str | None:
-# Возвращает None если пароль валиден, иначе сообщение об ошибке
-    if len(password) < 8:
-        return "Минимум 8 символов"
+    if len(password) < 10:
+        return "Минимум 10 символов"
     if not re.search(r"[A-Za-z]", password):
         return "Нужна хотя бы одна буква"
     if not re.search(r"\d", password):
@@ -107,79 +227,30 @@ def _validate_password(password: str) -> str | None:
     return None
 
 
-# Endpoints:
-
-class LoginRequest(BaseModel):
-    login: str
-    password: str
-
-
-class CredentialsUpdate(BaseModel):
-    new_login: str = Field(min_length=3, max_length=64)
-    new_password: str = Field(min_length=8)
-    current_password: str
-
-
-@router.post("/login")
-async def login(data: LoginRequest):
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+@router.post("/login", response_model=LoginResponse)
+async def login(data: LoginRequest, request: Request):
+    ip = request.client.host if request.client else "unknown"
+    await _check_rate_limit(ip)
     creds = _load_creds()
-    if data.login != creds["login"]:
+    if data.login != creds["login"] or not _verify_password(data.password, creds["password_hash"]):
         raise HTTPException(401, "Неверный логин или пароль")
-    if _hash_password(data.password) != creds["password_hash"]:
-        raise HTTPException(401, "Неверный логин или пароль")
-    token = _make_token(data.login)
-    return {"token": token, "login": data.login, "expires_in": TOKEN_TTL}
+    await _clear_rate_limit(ip)
+    return LoginResponse(token=_make_token(data.login), login=data.login, expires_in=TOKEN_TTL)
 
 
-@router.get("/me")
+@router.get("/me", response_model=MeResponse)
 async def me(login: str = Depends(require_auth)):
-    return {"login": login, "authenticated": True}
+    return MeResponse(login=login, authenticated=True)
 
 
-@router.patch("/credentials")
+@router.patch("/credentials", response_model=CredentialsUpdateResponse)
 async def update_credentials(data: CredentialsUpdate, login: str = Depends(require_auth)):
     creds = _load_creds()
-# Проверяем текущий пароль
-    if _hash_password(data.current_password) != creds["password_hash"]:
+    if not _verify_password(data.current_password, creds["password_hash"]):
         raise HTTPException(400, "Неверный текущий пароль")
-# Валидируем новый пароль
     err = _validate_password(data.new_password)
     if err:
         raise HTTPException(400, err)
     _save_creds(data.new_login, _hash_password(data.new_password))
-# Возвращаем новый токен
-    token = _make_token(data.new_login)
-    return {"ok": True, "token": token, "login": data.new_login}
-
-
-def _send_email_sync(to_email: str, subject: str, body: str):
-    smtp_host = os.getenv("SMTP_HOST", "")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_user = os.getenv("SMTP_USER", "")
-    smtp_pass = os.getenv("SMTP_PASSWORD", "")
-    smtp_from = os.getenv("SMTP_FROM", smtp_user)
-
-    if not smtp_host or not smtp_user:
-# Если SMTP не настроен — пишем в логи
-        import logging
-        logging.getLogger(__name__).warning(
-            "SMTP not configured. Recovery email to %s: %s / %s", to_email, subject, body
-        )
-        return False
-
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = subject
-    msg["From"] = smtp_from
-    msg["To"] = to_email
-
-    try:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_pass)
-            server.sendmail(smtp_from, [to_email], msg.as_string())
-        return True
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).error("Email send failed: %s", e)
-        return False
-
+    return CredentialsUpdateResponse(ok=True, token=_make_token(data.new_login), login=data.new_login)

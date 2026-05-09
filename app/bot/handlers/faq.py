@@ -4,20 +4,29 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 router = Router()
 BASE_URL = "http://app:8000"
+_BACK_BTN = [[InlineKeyboardButton(text="⬅️ В меню", callback_data="menu_back")]]
+
+
+async def _fetch_faq() -> list[dict]:
+    """Загружает список FAQ из API. Возвращает пустой список при ошибке."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{BASE_URL}/faq/")
+            resp.raise_for_status()
+            return resp.json()
+    except Exception:
+        return []
 
 
 @router.callback_query(F.data == "menu_faq")
 async def open_faq(callback: CallbackQuery):
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{BASE_URL}/faq/")
-    items = [i for i in resp.json() if i.get("is_active")]
+    all_items = await _fetch_faq()
+    items = [i for i in all_items if i.get("is_active")]
 
     if not items:
         await callback.message.edit_text(
             "❓ FAQ пока пуст.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ В меню", callback_data="menu_back")]
-            ])
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=_BACK_BTN),
         )
         await callback.answer()
         return
@@ -25,7 +34,7 @@ async def open_faq(callback: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=item["question"], callback_data=f"faq_{item['id']}")]
         for item in items
-    ] + [[InlineKeyboardButton(text="⬅️ В меню", callback_data="menu_back")]])
+    ] + _BACK_BTN)
 
     await callback.message.edit_text("❓ <b>Часто задаваемые вопросы</b>", reply_markup=kb, parse_mode="HTML")
     await callback.answer()
@@ -34,9 +43,8 @@ async def open_faq(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("faq_"))
 async def show_faq_answer(callback: CallbackQuery):
     item_id = int(callback.data.split("_")[1])
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{BASE_URL}/faq/")
-    items = {i["id"]: i for i in resp.json()}
+    all_items = await _fetch_faq()
+    items = {i["id"]: i for i in all_items}
     item = items.get(item_id)
 
     if not item:

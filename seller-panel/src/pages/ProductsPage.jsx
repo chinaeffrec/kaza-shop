@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../api.js'
 import s from './ProductsPage.module.css'
 import ToggleSwitch from "../components/ToggleSwitch.jsx";
@@ -15,6 +15,7 @@ const EMPTY = {
   is_active: true,
   _cat_id: ''
 }
+const PER_PAGE = 20
 
 export default function ProductsPage() {
   const toast = useToast()
@@ -27,6 +28,7 @@ export default function ProductsPage() {
   const [subcats, setSubcats]             = useState([])
   const [loading, setLoading]             = useState(true)
   const [search, setSearch]               = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [filterCat, setFilterCat]         = useState('')
   const [filterSub, setFilterSub]         = useState('')
   const [filterSubOpts, setFilterSubOpts] = useState([])
@@ -40,37 +42,66 @@ export default function ProductsPage() {
   const [saving, setSaving]               = useState(false)
   const [hideNoStock, setHideNoStock]     = useState(false)
   const [selectedIds, setSelectedIds]     = useState([])
-  const PER_PAGE = 20
+  const searchTimer = useRef(null)
 
-  const load = useCallback(async (pageOverride) => {
-    const page = pageOverride || 1
+  // Дебаунс поиска — запрос идёт через 400 мс после последнего нажатия
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    searchTimer.current = setTimeout(() => setDebouncedSearch(search), 400)
+    return () => clearTimeout(searchTimer.current)
+  }, [search])
+
+  // Загрузка справочников — 3 параллельных запроса вместо N+1
+  useEffect(() => {
+    async function loadMeta() {
+      try {
+        const [cats, allSubs, cfg] = await Promise.all([
+          api.getCategories(),
+          api.getAllSubcategories(),
+          api.getSettings(),
+        ])
+        setHideNoStock(cfg.hide_out_of_stock || false)
+        setCategories(cats)
+
+        const catMap = Object.fromEntries(cats.map(c => [c.id, c.name]))
+        const subMap = {}
+        for (const sub of allSubs)
+          subMap[sub.id] = { name: sub.name, category_name: catMap[sub.category_id] || '—', category_id: sub.category_id }
+        setAllSubcats(subMap)
+      } catch (e) {
+        toast('Ошибка загрузки справочников: ' + e.message)
+      }
+    }
+    loadMeta()
+  }, [])
+
+  // Загрузка товаров — при изменении страницы или фильтров
+  const loadProducts = useCallback(async (page = 1) => {
     setLoading(true)
     try {
-      const [prodRes, cats, cfg] = await Promise.all([
-        api.getProducts(1, 10000),
-        api.getCategories(),
-        api.getSettings(),
-      ])
-      setHideNoStock(cfg.hide_out_of_stock || false)
-      setProducts(prodRes.items || prodRes || [])
+      const filters = {}
+      if (debouncedSearch) filters.search = debouncedSearch
+      if (filterSub)       filters.subcategory_id = filterSub
+      else if (filterCat)  filters.category_id = filterCat
+      if (onlyNoPhoto)     filters.has_image = false
+
+      const res = await api.getProducts(page, PER_PAGE, filters)
+      setProducts(res.items || [])
+      setProductsTotal(res.total || 0)
+      setProductsPages(res.pages || 1)
       setProductsPage(page)
-      setCategories(cats)
-      const subResults = await Promise.all(
-        cats.map(cat => api.getSubcategories(cat.id).then(subs => ({ cat, subs })))
-      )
-      const subMap = {}
-      for (const { cat, subs } of subResults)
-        for (const sub of subs)
-          subMap[sub.id] = { name: sub.name, category_name: cat.name, category_id: cat.id }
-      setAllSubcats(subMap)
     } catch (e) {
-      toast('Ошибка загрузки: ' + e.message)
+      toast('Ошибка загрузки товаров: ' + e.message)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [debouncedSearch, filterCat, filterSub, onlyNoPhoto])
 
-  useEffect(() => { load(1) }, [load])
+  // При смене фильтров — сбрасываем на страницу 1
+  useEffect(() => {
+    loadProducts(1)
+    setSelectedIds([])
+  }, [loadProducts])
 
   useEffect(() => {
     if (!filterCat) { setFilterSubOpts([]); setFilterSub(''); return }
@@ -84,12 +115,8 @@ export default function ProductsPage() {
   }, [form._cat_id])
 
   useEffect(() => {
-    setProductsPage(1)
-  }, [search, filterCat, filterSub, onlyNoPhoto])
-
-  useEffect(() => {
     setSelectedIds([])
-  }, [search, filterCat, filterSub, onlyNoPhoto, productsPage])
+  }, [productsPage])
 
   function openAdd() {
     setForm(EMPTY)
@@ -128,39 +155,62 @@ export default function ProductsPage() {
     if (!form.price) return toast('Введите цену')
     if (!form.subcategory_id) return toast('Выберите категорию и подкатегорию')
 
-    setSaving(true)
-    try {
-      const payload = {
-        name: form.name.trim(),
-        price: parseInt(form.price),
-        discount_price: form.discount_price ? parseInt(form.discount_price) : null,
-        subcategory_id: parseInt(form.subcategory_id),
-        description: form.description || null,
-        characteristics: form.characteristics || null,
-        stock: parseInt(form.stock) || 0,
-        is_active: form.is_active,
-      }
+    const isEdit = modal?.type === 'edit'
+    const productId = modal?.product?.id  // захватываем до закрытия модала
+    const capturedPhoto = photoFile
+    const capturedExtras = { ...extraPhotos }
 
-      const saved = modal?.type === 'add'
-        ? await api.createProduct(payload)
-        : await api.updateProduct(modal.product.id, payload)
+    const payload = {
+      name: form.name.trim(),
+      price: parseInt(form.price),
+      discount_price: form.discount_price ? parseInt(form.discount_price) : null,
+      subcategory_id: parseInt(form.subcategory_id),
+      description: form.description || null,
+      characteristics: form.characteristics || null,
+      stock: parseInt(form.stock) || 0,
+      is_active: form.is_active,
+    }
 
-      if (photoFile) {
-        await api.uploadPhotoSlot(saved.id, 1, photoFile)
-      }
-
-      for (const [slot, file] of Object.entries(extraPhotos)) {
-        if (file) {
-          await api.uploadPhotoSlot(saved.id, parseInt(slot), file)
-        }
-      }
-
-      setExtraPhotos({})
-      setExtraPreviews({})
+    // Для редактирования — закрываем карточку сразу, не ждём сервер
+    if (isEdit) {
+      setModal(null)
       setPhotoFile(null)
       setPhotoPreview(null)
-      setModal(null)
-      await load()
+      setExtraPhotos({})
+      setExtraPreviews({})
+    } else {
+      setSaving(true)
+    }
+
+    try {
+      const saved = isEdit
+        ? await api.updateProduct(productId, payload)
+        : await api.createProduct(payload)
+
+      // Для добавления закрываем после получения ID (нужен для фото)
+      if (!isEdit) {
+        setModal(null)
+        setPhotoFile(null)
+        setPhotoPreview(null)
+        setExtraPhotos({})
+        setExtraPreviews({})
+      }
+
+      loadProducts(productsPage)
+
+      // Фото загружаются в фоне
+      if (capturedPhoto) {
+        api.uploadPhotoSlot(saved.id, 1, capturedPhoto)
+          .then(() => loadProducts(productsPage))
+          .catch(e => toast('Ошибка загрузки фото: ' + e.message))
+      }
+      for (const [slot, file] of Object.entries(capturedExtras)) {
+        if (file) {
+          api.uploadPhotoSlot(saved.id, parseInt(slot), file)
+            .then(() => loadProducts(productsPage))
+            .catch(e => toast(`Ошибка загрузки фото ${slot}: ` + e.message))
+        }
+      }
     } catch (e) {
       console.error(e)
       toast('Ошибка сохранения: ' + (e.message || e))
@@ -172,7 +222,7 @@ export default function ProductsPage() {
   async function handleDelete(id) {
     if (!confirm('Удалить товар?')) return
     await api.deleteProduct(id).catch(e => toast(e.message))
-    await load()
+    await loadProducts(productsPage)
   }
 
   async function handleBulkDelete() {
@@ -182,7 +232,7 @@ export default function ProductsPage() {
       const res = await api.bulkDeleteProducts(selectedIds)
       toast(`Удалено товаров: ${res.deleted ?? selectedIds.length}`)
       setSelectedIds([])
-      await load(1)
+      await loadProducts(1)
     } catch (e) {
       toast(e.message || 'Ошибка массового удаления')
     }
@@ -190,12 +240,12 @@ export default function ProductsPage() {
 
   async function handleDeletePhotoSlot(productId, slot) {
     await api.deletePhotoSlot(productId, slot).catch(e => toast(e.message))
-    await load()
+    await loadProducts(productsPage)
   }
 
   async function toggleActive(p) {
     await api.toggleActive(p.id, !p.is_active).catch(e => toast(e.message))
-    await load()
+    await loadProducts(productsPage)
   }
 
   async function toggleHideNoStock(val) {
@@ -204,32 +254,11 @@ export default function ProductsPage() {
     await api.reloadCache()
   }
 
-  const filtered = products.filter(p => {
-    if (onlyNoPhoto && p.has_image) return false
-    if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false
-    if (filterCat) {
-      const sub = allSubcats[p.subcategory_id]
-      if (!sub || String(sub.category_id) !== String(filterCat)) return false
-    }
-    if (filterSub && String(p.subcategory_id) !== String(filterSub)) return false
-    return true
-  })
-
-  const pages = Math.max(1, Math.ceil(filtered.length / PER_PAGE))
-  const safePage = Math.min(productsPage, pages)
-  const start = (safePage - 1) * PER_PAGE
-  const visible = filtered.slice(start, start + PER_PAGE)
+  // Фильтрация и пагинация полностью на сервере — products уже нужная страница
+  const visible = products
   const visibleIds = visible.map(p => p.id)
   const selectedVisibleCount = selectedIds.filter(id => visibleIds.includes(id)).length
   const allVisibleSelected = visible.length > 0 && selectedVisibleCount === visible.length
-
-  useEffect(() => {
-    setProductsTotal(filtered.length)
-    setProductsPages(pages)
-    if (productsPage !== safePage) setProductsPage(safePage)
-  }, [filtered.length, pages, productsPage, safePage])
-
-  if (loading) return <p className={s.msg}>Загрузка...</p>
 
   return (
     <div>
@@ -266,19 +295,23 @@ export default function ProductsPage() {
 
       {productsPages > 1 && (
         <div style={{display:'flex', gap:8, alignItems:'center', marginBottom:12, fontSize:13, color:'#555'}}>
-          <button onClick={() => setProductsPage(p => Math.max(1, p - 1))} disabled={productsPage <= 1}
+          <button onClick={() => loadProducts(Math.max(1, productsPage - 1))} disabled={productsPage <= 1}
             style={{padding:'4px 12px', borderRadius:6, border:'1px solid #ddd', background:'#fff', cursor:productsPage<=1?'default':'pointer'}}>
             ←
           </button>
           <span>Стр. {productsPage} из {productsPages} (всего {productsTotal})</span>
-          <button onClick={() => setProductsPage(p => Math.min(productsPages, p + 1))} disabled={productsPage >= productsPages}
+          <button onClick={() => loadProducts(Math.min(productsPages, productsPage + 1))} disabled={productsPage >= productsPages}
             style={{padding:'4px 12px', borderRadius:6, border:'1px solid #ddd', background:'#fff', cursor:productsPage>=productsPages?'default':'pointer'}}>
             →
           </button>
         </div>
       )}
 
-      {visible.length === 0 ? <p className={s.msg}>Товары не найдены</p> : (
+      {loading ? (
+        <p className={s.msg}>Загрузка...</p>
+      ) : visible.length === 0 ? (
+        <p className={s.msg}>Товары не найдены</p>
+      ) : (
         <table className={s.table}>
           <thead>
             <tr>
@@ -443,7 +476,7 @@ export default function ProductsPage() {
                           } else {
                             setExtraPreviews(prev => ({ ...prev, [slot]: null }))
                           }
-                          await load()
+                          await loadProducts(productsPage)
                         }}
                         title="Удалить фото">🗑</button>
                     )}

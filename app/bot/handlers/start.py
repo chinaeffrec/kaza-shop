@@ -20,6 +20,7 @@ async def start_handler(message: Message):
     user_id = message.from_user.id
     now = time.time()
 
+    # Защита от двойного нажатия
     if user_id in _last_start and (now - _last_start[user_id]) < 3:
         try:
             await message.delete()
@@ -42,8 +43,9 @@ async def start_handler(message: Message):
 
     welcome_text = DEFAULT_WELCOME
     try:
+        # /settings/public — публичный эндпоинт, не требует токена
         async with httpx.AsyncClient(timeout=3) as client:
-            r = await client.get(f"{BASE_URL}/settings/")
+            r = await client.get(f"{BASE_URL}/settings/public")
             if r.status_code == 200:
                 welcome_text = r.json().get("welcome_message") or DEFAULT_WELCOME
     except Exception:

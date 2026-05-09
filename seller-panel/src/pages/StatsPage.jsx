@@ -7,7 +7,6 @@ export default function StatsPage({ saved, onSave }) {
   const toast = useToast()
   const [dashboard, setDashboard] = useState(saved?.dashboard || null)
   const [stats, setStats]         = useState(saved?.stats || [])
-  const [products, setProducts]   = useState(saved?.products || {})
   const [productsSummary, setProductsSummary] = useState(saved?.productsSummary || null)
   const [dateFrom, setDateFrom]   = useState(saved?.dateFrom || '')
   const [dateTo, setDateTo]       = useState(saved?.dateTo || '')
@@ -27,23 +26,17 @@ export default function StatsPage({ saved, onSave }) {
 
     setLoading(true)
     try {
-      const [dash, statsRes, prods] = await Promise.all([
+      const [dash, statsRes] = await Promise.all([
         api.getDashboard(from || null, to || null),
         api.getStats(from || null, to || null),
-        api.getProducts(1, 10000),
       ])
-      const map = {}
-      const prodItems = prods.items || prods
-      prodItems.forEach(p => { map[p.id] = p })
       setDashboard(dash)
       setStats(statsRes.items || [])
       setProductsSummary(statsRes.summary || null)
-      setProducts(map)
       onSave?.({
         dashboard: dash,
         stats: statsRes.items || [],
         productsSummary: statsRes.summary || null,
-        products: map,
         dateFrom: from,
         dateTo: to,
         sort,
@@ -224,10 +217,9 @@ export default function StatsPage({ saved, onSave }) {
               </tr></thead>
               <tbody>
                 {sorted.map(st => {
-                  const p = products[st.product_id]
                   return (
                     <tr key={st.product_id}>
-                      <td>{p ? p.name : `ID ${st.product_id}`}</td>
+                      <td>{st.name || `ID ${st.product_id}`}</td>
                       <td className={s.num}>{st.added_to_cart}</td>
                       <td className={s.num}>{st.ordered}</td>
                       <td className={`${s.num} ${st.returned>0?s.warn:''}`}>{st.returned}</td>

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -14,9 +14,19 @@ if TYPE_CHECKING:
 
 class Product(Base):
     __tablename__ = "products"
+    __table_args__ = (
+        # Основные запросы каталога: активные по подкатегории
+        Index("ix_products_subcategory_active", "subcategory_id", "is_active"),
+        # Фильтр по наличию (hide_out_of_stock)
+        Index("ix_products_stock", "stock"),
+        # Поиск по имени
+        Index("ix_products_name", "name"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    subcategory_id: Mapped[int] = mapped_column(ForeignKey("subcategories.id", ondelete="CASCADE"))
+    subcategory_id: Mapped[int] = mapped_column(
+        ForeignKey("subcategories.id", ondelete="CASCADE")
+    )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     price: Mapped[int] = mapped_column(Integer, nullable=False)
     discount_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -27,8 +37,14 @@ class Product(Base):
     image_file_id_3: Mapped[str | None] = mapped_column(String(512), nullable=True)
     stock: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     subcategory: Mapped["SubCategory"] = relationship("SubCategory", back_populates="products")
 

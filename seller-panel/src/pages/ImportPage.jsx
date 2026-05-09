@@ -1,10 +1,8 @@
 import { useState, useRef } from 'react'
 import { api } from '../api.js'
 import s from './ImportPage.module.css'
-import { useToast } from '../components/Toast.jsx'
 
 export default function ImportPage() {
-  const toast = useToast()
   const [dragging, setDragging] = useState(false)
   const [file, setFile]         = useState(null)
   const [result, setResult]     = useState(null)

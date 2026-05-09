@@ -6,6 +6,18 @@ x-logging: &default-logging
 
 services:
 
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   db:
     image: postgres:15
     restart: always
@@ -14,8 +26,9 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
     ports:
-      - "127.0.0.1:5432:5432"   # слушать только localhost
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -28,68 +41,69 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    deploy:
-      resources:
-        limits:
-          memory: 512M
     restart: always
     logging: *default-logging
     ports:
       - "8000:8000"
     volumes:
-      - .:/app
+      # Только данные — НЕ монтируем код поверх образа
       - ./media:/app/media
       - ./data:/app/data
+      - ./logs:/app/logs
     env_file: .env
     depends_on:
       db:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
-      interval: 10s
-      timeout: 5s
+      interval: 15s
+      timeout: 10s
       retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   bot:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: kaza_shop_bot
-    deploy:
-      resources:
-        limits:
-          memory: 512M
     restart: always
     logging: *default-logging
-    env_file: .env
     command: python -m app.bot.bot
+    env_file: .env
     volumes:
-      - .:/app
       - ./media:/app/media
     depends_on:
       app:
         condition: service_healthy
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   seller:
     build:
       context: ./seller-panel
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: "http://localhost:8000"
     container_name: kaza_seller_panel
     restart: always
     logging: *default-logging
     ports:
-      - "5173:5173"
-    environment:
-      - VITE_API_URL=http://localhost:8000
-    volumes:
-      - ./seller-panel:/app
-      - seller_node_modules:/app/node_modules
+      - "5173:80"
     depends_on:
       app:
         condition: service_healthy
 
 volumes:
   postgres_data:
+  redis_data:
   seller_node_modules:

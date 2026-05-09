@@ -7,7 +7,6 @@ import ImportPage from './pages/ImportPage.jsx'
 import StatsPage from './pages/StatsPage.jsx'
 import SettingsPage from './pages/SettingsPage.jsx'
 import s from './App.module.css'
-import { useToast } from './components/Toast.jsx'
 
 const NAV = [
   { id: 'products', label: '📦 Товары' },
@@ -25,7 +24,6 @@ function getInitialPage() {
 }
 
 export default function App() {
-  const toast = useToast()
   const [authed, setAuthed]         = useState(false)
   const [authChecked, setChecked]   = useState(false)
   const [adminLogin, setAdminLogin] = useState('')

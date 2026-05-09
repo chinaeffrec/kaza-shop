@@ -1,51 +1,34 @@
+"""
+Ручной скрипт для применения SQL-миграций.
+Для новых изменений схемы используйте Alembic:
+  alembic revision --autogenerate -m "описание"
+  alembic upgrade head
+"""
 import asyncio
-import os
+import logging
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-DATABASE_URL = (
-    f"postgresql+asyncpg://{os.getenv('DB_USER')}:"
-    f"{os.getenv('DB_PASSWORD')}@"
-    f"{os.getenv('DB_HOST')}:"
-    f"{os.getenv('DB_PORT')}/"
-    f"{os.getenv('DB_NAME')}"
-)
+from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
+_cfg = get_settings()
 
 MIGRATIONS = [
-    "ALTER TABLE products ADD COLUMN IF NOT EXISTS image_file_id VARCHAR(512)",
-    "ALTER TABLE products ADD COLUMN IF NOT EXISTS discount_price INTEGER",
-    "ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INTEGER DEFAULT 0",
-    "ALTER TABLE products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
-
-    "ALTER TABLE products ALTER COLUMN characteristics TYPE TEXT USING characteristics::TEXT",
-
-    "ALTER TABLE categories DROP COLUMN IF EXISTS slug",
-    "ALTER TABLE subcategories DROP COLUMN IF EXISTS slug",
-
-    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
-    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS comment TEXT",
-    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_address TEXT",
-
-    "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS welcome_message TEXT",
-    "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS seller_contact VARCHAR(256)",
-    "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS admin_contact VARCHAR(256)",
-    "ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS hide_out_of_stock BOOLEAN DEFAULT FALSE",
-    "ALTER TABLE products ADD COLUMN IF NOT EXISTS image_file_id_2 VARCHAR(512)",
-    "ALTER TABLE products ADD COLUMN IF NOT EXISTS image_file_id_3 VARCHAR(512)",
+    # Пример: "ALTER TABLE products ADD COLUMN IF NOT EXISTS weight INTEGER DEFAULT 0;",
 ]
 
-async def run():
-    engine = create_async_engine(DATABASE_URL, echo=False)
+
+async def run_migrations():
+    engine = create_async_engine(_cfg.database_url, echo=True)
     async with engine.begin() as conn:
         for sql in MIGRATIONS:
-            try:
-                await conn.execute(text(sql))
-                print(f"  OK  {sql[:80]}")
-            except Exception as e:
-                print(f" SKIP {sql[:80]}\n      → {e}")
+            logger.info("Running: %s", sql[:80])
+            await conn.execute(text(sql))
     await engine.dispose()
-    print("\n✅ Migration complete")
+    logger.info("Migrations complete")
+
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    asyncio.run(run_migrations())

@@ -71,7 +71,7 @@ async def _generate_placeholder_image(product) -> bytes:
     shop_title = "Kaza Shop"
     try:
         async with httpx.AsyncClient(timeout=2) as client:
-            r = await client.get("http://app:8000/settings/")
+            r = await client.get("http://app:8000/settings/public")
             if r.status_code == 200:
                 shop_title = r.json().get("shop_name", "Kaza Shop")
     except Exception:
@@ -276,9 +276,20 @@ class RenderEngine:
         elif screen.type == "cart":
             from app.bot.handlers.menu import build_cart_keyboard, build_cart_text
             user_id = message.chat.id
-            async with httpx.AsyncClient() as client:
-                response = await client.get(f"http://app:8000/cart/{user_id}")
-            data = response.json()
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    response = await client.get(f"http://app:8000/cart/{user_id}")
+                data = response.json()
+            except Exception as e:
+                logger.warning("Cart fetch failed for user %s: %s", user_id, e)
+                await _render_text(
+                    message,
+                    "🛒 Не удалось загрузить корзину. Попробуйте позже.",
+                    InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="⬅️ В меню", callback_data="menu_back")
+                    ]]),
+                )
+                return
             if not data.get("items"):
                 await _render_text(
                     message,

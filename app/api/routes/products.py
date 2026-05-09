@@ -1,243 +1,99 @@
-import uuid
-from pathlib import Path
+"""Роуты товаров — только HTTP-слой, вся логика в product_service."""
 from typing import Optional
 
-import aiofiles
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from pydantic import BaseModel
-from sqlalchemy import select
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.routes.auth import require_auth
+from app.api.schemas.product import (
+    ProductBulkDelete, ProductCreate, ProductListResponse, ProductResponse, ProductUpdate,
+)
 from app.db.session import get_session
-from app.models.product import Product
+from app.services import product_service as svc
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
-MEDIA_DIR = Path("/app/media")
-ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+@router.post("/", response_model=ProductResponse)
+async def create_product(
+    data: ProductCreate,
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_auth),
+):
+    return await svc.create_product(data, session)
 
 
-async def _reload_bot_cache():
-    try:
-        import httpx
-        async with httpx.AsyncClient(timeout=2) as client:
-            await client.post("http://bot:8001/reload-cache")
-    except Exception:
-        pass
-
-
-class ProductCreate(BaseModel):
-    subcategory_id: int
-    name: str
-    price: int
-    discount_price: Optional[int] = None
-    description: Optional[str] = None
-    characteristics: Optional[str] = None
-    stock: int = 0
-    is_active: bool = True
-
-
-class ProductUpdate(BaseModel):
-    name: Optional[str] = None
-    price: Optional[int] = None
-    discount_price: Optional[int] = None
-    description: Optional[str] = None
-    characteristics: Optional[str] = None
-    stock: Optional[int] = None
-    is_active: Optional[bool] = None
-    subcategory_id: Optional[int] = None
-
-
-class ProductBulkDelete(BaseModel):
-    ids: list[int]
-
-
-@router.post("/", response_model=dict)
-async def create_product(data: ProductCreate, session: AsyncSession = Depends(get_session)):
-    product = Product(**data.dict())
-    session.add(product)
-    await session.commit()
-    await session.refresh(product)
-    await _reload_bot_cache()
-    return _product_dict(product)
-
-
-@router.get("/", response_model=dict)
+@router.get("/", response_model=ProductListResponse)
 async def list_products(
     page: int = Query(default=1, ge=1),
-    per_page: int = Query(default=20, ge=1),
+    per_page: int = Query(default=20, ge=1, le=200),
+    search: Optional[str] = Query(default=None, max_length=200),
+    subcategory_id: Optional[int] = Query(default=None),
+    category_id: Optional[int] = Query(default=None),
+    has_image: Optional[bool] = Query(default=None),
     session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_auth),
 ):
-    total_result = await session.execute(select(Product))
-    total = len(total_result.scalars().all())
-
-    offset = (page - 1) * per_page
-    result = await session.execute(
-        select(Product).order_by(Product.id.asc()).offset(offset).limit(per_page)
+    return await svc.list_products(
+        page, per_page, session,
+        search=search,
+        subcategory_id=subcategory_id,
+        category_id=category_id,
+        has_image=has_image,
     )
-    products = [_product_dict(p) for p in result.scalars().all()]
-    return {
-        "items": products,
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-        "pages": max(1, (total + per_page - 1) // per_page),
-    }
 
 
-@router.patch("/{product_id}", response_model=dict)
-async def update_product(product_id: int, data: ProductUpdate, session: AsyncSession = Depends(get_session)):
-    product = await _get_or_404(product_id, session)
-    for field, value in data.dict(exclude_unset=True).items():
-        setattr(product, field, value)
-    await session.commit()
-    await session.refresh(product)
-    await _reload_bot_cache()
-    return _product_dict(product)
+@router.patch("/{product_id}", response_model=ProductResponse)
+async def update_product(
+    product_id: int,
+    data: ProductUpdate,
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_auth),
+):
+    return await svc.update_product(product_id, data, session)
 
 
 @router.delete("/{product_id}")
-async def delete_product(product_id: int, session: AsyncSession = Depends(get_session)):
-    product = await _get_or_404(product_id, session)
-    for field in ("image_file_id", "image_file_id_2", "image_file_id_3"):
-        fn = getattr(product, field, None)
-        if fn:
-            p = MEDIA_DIR / fn
-            if p.exists():
-                p.unlink()
-    await session.delete(product)
-    await session.commit()
-    await _reload_bot_cache()
-    return {"status": "deleted"}
+async def delete_product(
+    product_id: int,
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_auth),
+):
+    return await svc.delete_product(product_id, session)
 
 
 @router.post("/bulk-delete")
-async def bulk_delete_products(data: ProductBulkDelete, session: AsyncSession = Depends(get_session)):
-    ids = sorted(set(i for i in data.ids if isinstance(i, int) and i > 0))
-    if not ids:
-        raise HTTPException(400, "No product ids provided")
-
-    result = await session.execute(select(Product).where(Product.id.in_(ids)))
-    products = result.scalars().all()
-    if not products:
-        return {"status": "ok", "deleted": 0}
-
-    for product in products:
-        for field in ("image_file_id", "image_file_id_2", "image_file_id_3"):
-            fn = getattr(product, field, None)
-            if fn:
-                p = MEDIA_DIR / fn
-                if p.exists():
-                    p.unlink()
-        await session.delete(product)
-
-    await session.commit()
-    await _reload_bot_cache()
-    return {"status": "ok", "deleted": len(products)}
-
-
-def _photo_field(slot: int) -> str:
-    if slot == 1:
-        return "image_file_id"
-    return f"image_file_id_{slot}"
+async def bulk_delete_products(
+    data: ProductBulkDelete,
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_auth),
+):
+    return await svc.bulk_delete_products(data.ids, session)
 
 
 @router.post("/{product_id}/photo/{slot}")
-async def upload_photo_slot(
+async def upload_photo(
     product_id: int,
     slot: int,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_auth),
 ):
     if slot not in (1, 2, 3):
+        from fastapi import HTTPException
         raise HTTPException(400, "Slot must be 1, 2 or 3")
-    return await _upload_slot(product_id, slot, file, session)
+    return await svc.upload_photo(product_id, slot, file, session, background_tasks)
 
 
 @router.delete("/{product_id}/photo/{slot}")
-async def delete_photo_slot(
+async def delete_photo(
     product_id: int,
     slot: int,
     session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_auth),
 ):
     if slot not in (1, 2, 3):
+        from fastapi import HTTPException
         raise HTTPException(400, "Slot must be 1, 2 or 3")
-    return await _delete_slot(product_id, slot, session)
-
-
-async def _upload_slot(product_id: int, slot: int, file: UploadFile, session: AsyncSession):
-    if file.content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(400, f"Unsupported type: {file.content_type}. Use JPEG, PNG or WebP.")
-    product = await _get_or_404(product_id, session)
-    field = _photo_field(slot)
-
-    old_fn = getattr(product, field, None)
-    if old_fn:
-        old_path = MEDIA_DIR / old_fn
-        if old_path.exists():
-            old_path.unlink()
-
-    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "jpg"
-    suffix = "" if slot == 1 else f"_s{slot}"
-    filename = f"product_{product_id}{suffix}_{uuid.uuid4().hex[:8]}.{ext}"
-    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-    content = await file.read()
-    async with aiofiles.open(MEDIA_DIR / filename, "wb") as out:
-        await out.write(content)
-
-    setattr(product, field, filename)
-    await session.commit()
-    await _reload_bot_cache()
-    return {"status": "ok", "slot": slot, "filename": filename, "url": f"/media/{filename}"}
-
-
-async def _delete_slot(product_id: int, slot: int, session: AsyncSession):
-    product = await _get_or_404(product_id, session)
-    field = _photo_field(slot)
-    fn = getattr(product, field, None)
-    if fn:
-        path = MEDIA_DIR / fn
-        if path.exists():
-            path.unlink()
-        setattr(product, field, None)
-        await session.commit()
-        await _reload_bot_cache()
-    return {"status": "ok"}
-
-async def _get_or_404(product_id: int, session: AsyncSession) -> Product:
-    result = await session.execute(select(Product).where(Product.id == product_id))
-    product = result.scalar_one_or_none()
-    if not product:
-        raise HTTPException(404, "Product not found")
-    return product
-
-
-def _product_dict(p: Product) -> dict:
-    images = [
-        f for f in [
-            p.image_file_id,
-            getattr(p, "image_file_id_2", None),
-            getattr(p, "image_file_id_3", None),
-        ] if f
-    ]
-    return {
-        "id": p.id,
-        "subcategory_id": p.subcategory_id,
-        "name": p.name,
-        "price": p.price,
-        "discount_price": p.discount_price,
-        "description": p.description,
-        "characteristics": p.characteristics,
-        "image_file_id": p.image_file_id,
-        "image_file_id_2": getattr(p, "image_file_id_2", None),
-        "image_file_id_3": getattr(p, "image_file_id_3", None),
-        "image_url": f"/media/{p.image_file_id}" if p.image_file_id else None,
-        "image_url_2": f"/media/{p.image_file_id_2}" if getattr(p, "image_file_id_2", None) else None,
-        "image_url_3": f"/media/{p.image_file_id_3}" if getattr(p, "image_file_id_3", None) else None,
-        "images": images,
-        "has_image": bool(p.image_file_id),
-        "stock": p.stock,
-        "is_active": p.is_active,
-        "created_at": p.created_at.isoformat() if p.created_at else None,
-        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
-    }
+    return await svc.delete_photo(product_id, slot, session)

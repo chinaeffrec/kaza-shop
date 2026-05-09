@@ -27,8 +27,9 @@ async def open_handler(callback: CallbackQuery):
     elif entity == "product":
         screen = Screen(type="product", product_id=entity_id)
         current = navigation.peek(user_id)
-        if current and current.type == "product":
-            navigation._stack[user_id][-1] = screen
+        stack = navigation._stack.get(user_id)
+        if current and current.type == "product" and stack:
+            stack[-1] = screen
         else:
             navigation.push(user_id, screen)
 
@@ -45,26 +46,29 @@ async def back(callback: CallbackQuery):
     user_id = callback.from_user.id
     current = navigation.peek(user_id)
 
+    # Карточка товара → список товаров подкатегории
     if current and current.type == "product":
         product = catalog_cache.get_product(current.product_id)
         if product:
-            sub = catalog_cache.get_subcategory_by_id(product.subcategory_id)
-            if sub:
-                navigation.reset(user_id)
-                screen = Screen(type="subcategories", category_id=sub.category_id)
-                navigation.push(user_id, screen)
-                await render_engine.render(screen, callback.message)
-                await callback.answer()
-                return
+            navigation.reset(user_id)
+            screen = Screen(type="products", subcategory_id=product.subcategory_id)
+            navigation.push(user_id, screen)
+            await render_engine.render(screen, callback.message)
+            await callback.answer()
+            return
 
-    if current and current.type in ("subcategories", "products"):
-        navigation.reset(user_id)
-        screen = Screen(type="categories")
-        navigation.push(user_id, screen)
-        await render_engine.render(screen, callback.message)
-        await callback.answer()
-        return
+    # Список товаров → список подкатегорий
+    if current and current.type == "products":
+        sub = catalog_cache.get_subcategory_by_id(current.subcategory_id)
+        if sub:
+            navigation.reset(user_id)
+            screen = Screen(type="subcategories", category_id=sub.category_id)
+            navigation.push(user_id, screen)
+            await render_engine.render(screen, callback.message)
+            await callback.answer()
+            return
 
+    # Список подкатегорий и всё остальное → список категорий
     navigation.reset(user_id)
     screen = Screen(type="categories")
     navigation.push(user_id, screen)

@@ -1,15 +1,25 @@
+import logging
+
 import httpx
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
+logger = logging.getLogger(__name__)
 router = Router()
 BASE_URL = "http://app:8000"
+_TIMEOUT = httpx.Timeout(10.0)
+
 
 async def refresh_cart(callback: CallbackQuery):
     user_id = callback.from_user.id
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"{BASE_URL}/cart/{user_id}")
-    data = response.json()
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            response = await client.get(f"{BASE_URL}/cart/{user_id}")
+        data = response.json()
+    except Exception as e:
+        logger.warning("refresh_cart failed for user %s: %s", user_id, e)
+        await callback.answer("Ошибка соединения, попробуйте позже", show_alert=True)
+        return
 
     from app.bot.handlers.menu import build_cart_keyboard, build_cart_text
     if not data.get("items"):
@@ -26,38 +36,56 @@ async def refresh_cart(callback: CallbackQuery):
         parse_mode="HTML",
     )
 
+
 @router.callback_query(F.data.startswith("inc_"))
 async def inc(callback: CallbackQuery):
     product_id = int(callback.data.split("_")[1])
-    async with httpx.AsyncClient() as client:
-        await client.post(f"{BASE_URL}/cart/inc", json={
-            "user_id": callback.from_user.id,
-            "product_id": product_id
-        })
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            await client.post(f"{BASE_URL}/cart/inc", json={
+                "user_id": callback.from_user.id,
+                "product_id": product_id
+            })
+    except Exception as e:
+        logger.warning("cart inc failed: %s", e)
+        await callback.answer("Ошибка, попробуйте позже", show_alert=True)
+        return
 
     await refresh_cart(callback)
     await callback.answer()
+
 
 @router.callback_query(F.data.startswith("dec_"))
 async def dec(callback: CallbackQuery):
     product_id = int(callback.data.split("_")[1])
-    async with httpx.AsyncClient() as client:
-        await client.post(f"{BASE_URL}/cart/dec", json={
-            "user_id": callback.from_user.id,
-            "product_id": product_id
-        })
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            await client.post(f"{BASE_URL}/cart/dec", json={
+                "user_id": callback.from_user.id,
+                "product_id": product_id
+            })
+    except Exception as e:
+        logger.warning("cart dec failed: %s", e)
+        await callback.answer("Ошибка, попробуйте позже", show_alert=True)
+        return
 
     await refresh_cart(callback)
     await callback.answer()
 
+
 @router.callback_query(F.data.startswith("rm_"))
 async def remove(callback: CallbackQuery):
     product_id = int(callback.data.split("_")[1])
-    async with httpx.AsyncClient() as client:
-        await client.post(f"{BASE_URL}/cart/remove", json={
-            "user_id": callback.from_user.id,
-            "product_id": product_id
-        })
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            await client.post(f"{BASE_URL}/cart/remove", json={
+                "user_id": callback.from_user.id,
+                "product_id": product_id
+            })
+    except Exception as e:
+        logger.warning("cart remove failed: %s", e)
+        await callback.answer("Ошибка, попробуйте позже", show_alert=True)
+        return
 
     await refresh_cart(callback)
     await callback.answer()

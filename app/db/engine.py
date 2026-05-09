@@ -1,11 +1,13 @@
-import os
-
 from sqlalchemy.ext.asyncio import create_async_engine
+from app.core.config import get_settings
 
-DATABASE_URL = f"postgresql+asyncpg://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
+_settings = get_settings()
 
 engine = create_async_engine(
-    DATABASE_URL,
+    _settings.database_url,
     echo=False,
     pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=3600,
 )
