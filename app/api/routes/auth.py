@@ -12,10 +12,11 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
 import bcrypt
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.api.schemas.auth import (
@@ -132,11 +133,11 @@ def _load_creds() -> dict:
                 logger.info("ADMIN_PASSWORD changed in env, updating credentials")
                 return _create_creds(env_pass, env_fp)
 
-            # Валидный bcrypt-хеш и fingerprint совпадает — всё ок
+            # Валидный bcrypt-хеш и fingerprint совпадает - всё ок
             if stored_hash.startswith("$2") and stored_fp == env_fp:
                 return data
 
-            # Старый формат (sha256 или без fingerprint) — мигрируем
+            # Старый формат (sha256 или без fingerprint) - мигрируем
             if stored_hash.startswith("$2") and not stored_fp:
                 logger.info("Migrating creds: adding env_fingerprint")
                 data["env_fingerprint"] = env_fp
@@ -179,7 +180,7 @@ def _save_creds(login: str, password_hash: str) -> None:
     data = {
         "login": login,
         "password_hash": password_hash,
-        # При смене через API fingerprint сбрасываем — пароль теперь независим от env
+        # При смене через API fingerprint сбрасываем - пароль теперь независим от env
         "env_fingerprint": "",
     }
     _save_creds_data(data)
@@ -214,6 +215,21 @@ def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)) 
     if not login:
         raise HTTPException(401, "Invalid or expired token")
     return login
+
+
+def require_bot_auth(
+    x_bot_token: Optional[str] = Header(default=None, alias="X-Bot-Token"),
+    x_bot_user_id: Optional[int] = Header(default=None, alias="X-Bot-User-Id"),
+) -> Optional[int]:
+    """
+    Авторизация внутренних bot-only эндпоинтов на уровне приложения.
+    Возвращает user_id из заголовка (если есть), чтобы сверять с payload/path.
+    """
+    if not _cfg.bot_api_token:
+        raise HTTPException(500, "BOT_API_TOKEN is not configured")
+    if not x_bot_token or x_bot_token != _cfg.bot_api_token:
+        raise HTTPException(401, "Invalid bot token")
+    return x_bot_user_id
 
 
 # ── Валидация пароля ──────────────────────────────────────────────────────────

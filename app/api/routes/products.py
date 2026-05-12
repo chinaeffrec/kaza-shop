@@ -1,4 +1,4 @@
-"""Роуты товаров — только HTTP-слой, вся логика в product_service."""
+"""Роуты товаров - только HTTP-слой, вся логика в product_service."""
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, UploadFile

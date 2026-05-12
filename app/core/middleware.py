@@ -11,7 +11,7 @@ from starlette.responses import Response
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Добавляет security-заголовки ко всем ответам.
 
-    Для /media/ (статические файлы-изображения) CSP не добавляется —
+    Для /media/ (статические файлы-изображения) CSP не добавляется -
     он не влияет на отображение изображений, но может сбивать браузер.
     """
 
@@ -27,7 +27,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "max-age=31536000; includeSubDomains"
             )
         # CSP только для API-ответов, не для медиафайлов и не для health-check.
-        # Медиафайлы — бинарные изображения, CSP на них бесполезен и иногда
+        # Медиафайлы - бинарные изображения, CSP на них бесполезен и иногда
         # мешает браузерам в нестандартных режимах.
         if not request.url.path.startswith("/media/") and request.url.path != "/health":
             response.headers["Content-Security-Policy"] = (

@@ -1,4 +1,4 @@
-"""Роуты статистики — только HTTP-слой."""
+"""Роуты статистики - только HTTP-слой."""
 from datetime import datetime
 from typing import Optional
 

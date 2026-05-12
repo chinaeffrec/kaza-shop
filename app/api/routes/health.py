@@ -1,8 +1,8 @@
 """
 Health check endpoints.
-GET /         — редирект на панель управления (для удобства)
-GET /health   — быстрая проверка (nginx, Docker healthcheck)
-GET /health/detail — детальная (только для авторизованных)
+GET /         - редирект на панель управления (для удобства)
+GET /health   - быстрая проверка (nginx, Docker healthcheck)
+GET /health/detail - детальная (только для авторизованных)
 """
 import time
 from datetime import datetime, timezone
@@ -20,10 +20,20 @@ router = APIRouter(tags=["system"])
 _start_time = time.monotonic()
 _cfg = get_settings()
 
+# Флаг выставляется из main.py после завершения миграций.
+# До этого /health возвращает 503 — Docker не помечает контейнер healthy
+# раньше времени и не пускает трафик пока приложение ещё не готово.
+_app_ready: bool = False
+
+
+def set_app_ready() -> None:
+    global _app_ready
+    _app_ready = True
+
 
 @router.get("/", include_in_schema=False)
 async def root():
-    """Корневой URL — перенаправляем в панель управления."""
+    """Корневой URL - перенаправляем в панель управления."""
     if _cfg.domain and _cfg.domain != "localhost":
         url = f"https://{_cfg.domain}"
     else:
@@ -33,7 +43,14 @@ async def root():
 
 @router.get("/health")
 async def health():
-    """Публичный — для nginx, Docker healthcheck, внешнего мониторинга."""
+    """Публичный - для nginx, Docker healthcheck, внешнего мониторинга."""
+    from fastapi import Response
+    if not _app_ready:
+        return Response(
+            content='{"status":"starting"}',
+            status_code=503,
+            media_type="application/json",
+        )
     return {"status": "ok", "ts": datetime.now(timezone.utc).isoformat()}
 
 
@@ -42,7 +59,7 @@ async def health_detail(
     session: AsyncSession = Depends(get_session),
     _: str = Depends(require_auth),
 ):
-    """Детальный статус — только для администратора."""
+    """Детальный статус - только для администратора."""
     uptime_sec = int(time.monotonic() - _start_time)
     checks: dict = {}
 

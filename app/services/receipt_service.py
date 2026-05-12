@@ -142,7 +142,7 @@ async def generate_and_send_receipt(order_id: int, session: AsyncSession) -> dic
     caption = f"🧾 <b>Чек по заказу #{order.id}</b>\nСумма: {_fmt_price(order.total)}\nСпасибо за покупку!"
     sent = await _send_document_telegram(order.user_id, str(filepath), caption, ORDER_STATUS_MARKUP)
 
-    # Удаляем временный PDF после отправки — он не нужен на диске
+    # Удаляем временный PDF после отправки - он не нужен на диске
     try:
         filepath.unlink(missing_ok=True)
     except Exception:

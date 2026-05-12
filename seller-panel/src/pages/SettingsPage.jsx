@@ -406,7 +406,7 @@ export default function SettingsPage({ onSaved, adminLogin }) {
 
         {/* Шаг 2: Медиафайлы */}
         <h3 style={{fontSize: 14, fontWeight: 600, color: '#333', marginBottom: 4, marginTop: 20}}>
-          Шаг 2 — Медиафайлы (фото товаров, логотип, печать, QR-код)
+          Шаг 2 — Медиафайлы (фото товаров, печать, QR-код)
         </h3>
         <p style={{fontSize: 12, color: '#888', marginBottom: 8}}>
           Без медиафайлов изображения товаров не будут отображаться на новом сервере.

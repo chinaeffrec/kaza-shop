@@ -9,7 +9,7 @@ from app.db.base import Base
 class Cart(Base):
     __tablename__ = "cart"
     __table_args__ = (
-        # Один товар — одна запись в корзине пользователя
+        # Один товар - одна запись в корзине пользователя
         UniqueConstraint("user_id", "product_id", name="uq_cart_user_product"),
         Index("ix_cart_user_id", "user_id"),
     )

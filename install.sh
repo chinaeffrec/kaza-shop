@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  Kaza Shop — Универсальный установщик v3.0
+#  Kaza Shop - Универсальный установщик v3.0
 #  Использование: bash install.sh
 # ==============================================================================
 set -euo pipefail
@@ -84,8 +84,8 @@ done
 echo ""
 
 # ── Определяем способ установки на сервер ─────────────────────────────────────
-# direct  — скрипт запущен прямо на сервере (Linux + root)
-# remote  — скрипт запущен на локальной машине, деплой через SSH
+# direct  - скрипт запущен прямо на сервере (Linux + root)
+# remote  - скрипт запущен на локальной машине, деплой через SSH
 DEPLOY_MODE="local"
 if [[ "$INSTALL_MODE" == "server" ]]; then
     if [[ "$(uname -s)" == "Linux" ]] && [[ "$EUID" -eq 0 ]]; then
@@ -173,7 +173,7 @@ if [[ "$INSTALL_MODE" == "local" ]]; then
 
     step "Шаг 2/3: Создание конфигурации"
 
-    # Если уже есть .env с DB_PASSWORD — переиспользуем его, чтобы не расходиться
+    # Если уже есть .env с DB_PASSWORD - переиспользуем его, чтобы не расходиться
     # с паролем, который уже записан в PostgreSQL-томе (повторный запуск / переустановка)
     EXISTING_ENV="${SCRIPT_DIR}/.env"
     VOLUME_NAME="$(basename "$SCRIPT_DIR")_postgres_data"
@@ -183,13 +183,15 @@ if [[ "$INSTALL_MODE" == "local" ]]; then
         if [[ -n "$OLD_DB_PASS" && -n "$OLD_SECRET" ]]; then
             DB_PASSWORD="$OLD_DB_PASS"
             SECRET_KEY="$OLD_SECRET"
+            BOT_API_TOKEN=$(grep '^BOT_API_TOKEN=' "$EXISTING_ENV" | cut -d= -f2-)
+            [[ -z "$BOT_API_TOKEN" ]] && BOT_API_TOKEN=$(gen_secret)
             ok "Существующий PostgreSQL-том найден — переиспользуем пароль БД"
         else
-            SECRET_KEY=$(gen_secret); DB_PASSWORD=$(gen_password)
+            SECRET_KEY=$(gen_secret); DB_PASSWORD=$(gen_password); BOT_API_TOKEN=$(gen_secret)
             ok "Секреты сгенерированы"
         fi
     else
-        SECRET_KEY=$(gen_secret); DB_PASSWORD=$(gen_password)
+        SECRET_KEY=$(gen_secret); DB_PASSWORD=$(gen_password); BOT_API_TOKEN=$(gen_secret)
         ok "Секреты сгенерированы"
     fi
 
@@ -203,12 +205,16 @@ if [[ "$INSTALL_MODE" == "local" ]]; then
         printf 'ADMIN_PASSWORD=%s\n' "$ADMIN_PASSWORD"
         printf 'ADMIN_TG_ID=%s\n'    "$ADMIN_TG_ID"
         printf 'BOT_TOKEN=%s\n'      "$BOT_TOKEN"
+        printf 'BOT_API_TOKEN=%s\n'  "$BOT_API_TOKEN"
         echo "DOMAIN=localhost"
         echo "CORS_ORIGINS=http://localhost:5173"
         printf 'ALERT_BOT_TOKEN=%s\n' "$BOT_TOKEN"
         printf 'ALERT_CHAT_ID=%s\n'   "$ADMIN_TG_ID"
         echo "REDIS_URL=redis://redis:6379/0"
         echo "BACKUP_KEEP_DAYS=14"; echo "LOG_LEVEL=INFO"
+        echo "UPDATE_CHANNEL=git"
+        echo "UPDATE_BRANCH=main"
+        echo "UPDATE_ARCHIVE_URL="
     } > "$EXISTING_ENV"
     chmod 600 "$EXISTING_ENV"
     ok ".env создан"
@@ -348,15 +354,36 @@ DOCKERCFG
     [[ "$CONFIRM" =~ ^[Yy]$ ]] || { info "Отменено."; exit 0; }
 
     step "Шаг 4/9: Генерация секретов"
-    SECRET_KEY=$(gen_secret); DB_PASSWORD=$(gen_password)
-    ok "Секреты сгенерированы"
+    # При переустановке на сервер с существующим PostgreSQL-томом сохраняем пароль БД.
+    # Новый пароль не совпадёт со старым томом → app не сможет подключиться.
+    EXISTING_ENV_DIRECT="${INSTALL_DIR}/.env"
+    VOLUME_NAME_DIRECT="kaza_shop_postgres_data"
+    if [[ -f "$EXISTING_ENV_DIRECT" ]] && docker volume ls -q | grep -qx "$VOLUME_NAME_DIRECT"; then
+        OLD_DB_PASS_D=$(grep '^DB_PASSWORD=' "$EXISTING_ENV_DIRECT" | cut -d= -f2-)
+        OLD_SECRET_D=$(grep '^SECRET_KEY='   "$EXISTING_ENV_DIRECT" | cut -d= -f2-)
+        if [[ -n "$OLD_DB_PASS_D" && -n "$OLD_SECRET_D" ]]; then
+            DB_PASSWORD="$OLD_DB_PASS_D"
+            SECRET_KEY="$OLD_SECRET_D"
+            BOT_API_TOKEN=$(grep '^BOT_API_TOKEN=' "$EXISTING_ENV_DIRECT" | cut -d= -f2-)
+            [[ -z "$BOT_API_TOKEN" ]] && BOT_API_TOKEN=$(gen_secret)
+            ok "Существующий PostgreSQL-том найден — переиспользуем пароль и ключ БД"
+        else
+            SECRET_KEY=$(gen_secret); DB_PASSWORD=$(gen_password); BOT_API_TOKEN=$(gen_secret)
+            ok "Секреты сгенерированы"
+        fi
+    else
+        SECRET_KEY=$(gen_secret); DB_PASSWORD=$(gen_password); BOT_API_TOKEN=$(gen_secret)
+        ok "Секреты сгенерированы"
+    fi
 
     step "Шаг 5/9: Копирование файлов"
     [[ "$SCRIPT_DIR" != "$INSTALL_DIR" ]] && mkdir -p "$INSTALL_DIR" && cp -r "${SCRIPT_DIR}/." "$INSTALL_DIR/" && ok "Файлы скопированы" || ok "Уже в $INSTALL_DIR"
     mkdir -p "${INSTALL_DIR}/media" "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs" "${INSTALL_DIR}/backups"
-    chown 1000:1000 "${INSTALL_DIR}/data" "${INSTALL_DIR}/media" "${INSTALL_DIR}/logs"
+    chown -R 1000:1000 "${INSTALL_DIR}/data" "${INSTALL_DIR}/media" "${INSTALL_DIR}/logs"
+    chmod 755 "${INSTALL_DIR}/data" "${INSTALL_DIR}/media" "${INSTALL_DIR}/logs"
     chmod 755 "${INSTALL_DIR}/backup.sh" "${INSTALL_DIR}/healthcheck.sh" \
-               "${INSTALL_DIR}/update.sh" "${INSTALL_DIR}/restore.sh" 2>/dev/null || true
+               "${INSTALL_DIR}/update.sh" "${INSTALL_DIR}/restore.sh" \
+               "${INSTALL_DIR}/deploy.sh" 2>/dev/null || true
     ok "Директории созданы"
 
     step "Шаг 6/9: Создание конфигурации"
@@ -370,12 +397,16 @@ DOCKERCFG
         printf 'ADMIN_PASSWORD=%s\n' "$ADMIN_PASSWORD"
         printf 'ADMIN_TG_ID=%s\n'   "$ADMIN_TG_ID"
         printf 'BOT_TOKEN=%s\n'     "$BOT_TOKEN"
+        printf 'BOT_API_TOKEN=%s\n' "$BOT_API_TOKEN"
         printf 'DOMAIN=%s\n'        "$DOMAIN"
         printf 'CORS_ORIGINS=https://%s\n' "$DOMAIN"
         printf 'ALERT_BOT_TOKEN=%s\n' "$BOT_TOKEN"
         printf 'ALERT_CHAT_ID=%s\n'   "$ADMIN_TG_ID"
         echo "REDIS_URL=redis://redis:6379/0"
         echo "BACKUP_KEEP_DAYS=14"; echo "LOG_LEVEL=INFO"
+        echo "UPDATE_CHANNEL=git"
+        echo "UPDATE_BRANCH=main"
+        echo "UPDATE_ARCHIVE_URL="
     } > "${INSTALL_DIR}/.env"
     chmod 600 "${INSTALL_DIR}/.env"
     ok ".env создан"
@@ -407,8 +438,35 @@ DOCKERCFG
 
     step "Шаг 8/9: Запуск магазина"
     cd "$INSTALL_DIR"
+    info "Проверяем файлы миграций Alembic..."
+    python3 - <<'PY'
+from pathlib import Path
+import sys
+
+base = Path("/opt/kaza_shop/alembic/versions")
+files = sorted(
+    p for p in base.glob("*.py")
+    if not p.name.startswith("._")
+)
+if not files:
+    print("ERROR: alembic/versions пуст")
+    sys.exit(1)
+
+for p in files:
+    b = p.read_bytes()
+    if b"\x00" in b:
+        print(f"ERROR: null bytes detected in {p}")
+        sys.exit(1)
+    try:
+        compile(b.decode("utf-8"), str(p), "exec")
+    except Exception as e:
+        print(f"ERROR: invalid migration file {p}: {e}")
+        sys.exit(1)
+print("Alembic migrations: OK")
+PY
+    ok "Миграции Alembic валидны"
     echo ""
-    echo -e "${YELLOW}  ⏳ Скачиваем и собираем образы — это займёт 5–15 минут.${NC}"
+    echo -e "${YELLOW}  ⏳ Скачиваем и собираем образы - это займёт 5-15 минут.${NC}"
     echo -e "${YELLOW}  Пожалуйста, не прерывайте процесс.${NC}"
     echo ""
     BUILD_OK=0
@@ -434,7 +492,9 @@ DOCKERCFG
         echo -n "."
     done
     echo ""
-    [[ $API_READY -eq 0 ]] && warn "API не ответил. Проверьте: docker compose -f docker-compose.prod.yml logs app"
+    if [[ $API_READY -eq 0 ]]; then
+        err "API не ответил. Установка прервана. Проверьте: docker compose -f docker-compose.prod.yml logs app"
+    fi
 
     if [[ $API_READY -eq 1 ]]; then
         info "Проверяем авторизацию администратора..."
@@ -471,17 +531,21 @@ SYSTEMD_EOF
     systemctl daemon-reload; systemctl enable kaza_shop.service
     ok "Автозапуск при перезагрузке настроен"
     (crontab -l 2>/dev/null | grep -v kaza_shop) > /tmp/crontab_kaza || true
-    printf '0 2 * * *   bash %s/backup.sh     >> %s/logs/backup.log  2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/crontab_kaza
-    printf '*/5 * * * * bash %s/healthcheck.sh >> %s/logs/monitor.log 2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/crontab_kaza
+    # Ежедневный бэкап в 02:00 (хранится 14 дней)
+    printf '0 2 * * *   bash %s/backup.sh           >> %s/logs/backup.log        2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/crontab_kaza
+    # Почасовой бэкап — перезаписывает предыдущий, отправляет файл в Telegram
+    printf '0 * * * *   bash %s/backup.sh --hourly  >> %s/logs/backup_hourly.log 2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/crontab_kaza
+    # Мониторинг каждые 5 минут
+    printf '*/5 * * * * bash %s/healthcheck.sh       >> %s/logs/monitor.log       2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/crontab_kaza
     crontab /tmp/crontab_kaza
-    ok "Cron: бэкап в 02:00, мониторинг каждые 5 мин"
+    ok "Cron: ежедневный бэкап в 02:00 (в Telegram), почасовой локально, мониторинг каждые 5 мин"
 
     PANEL_URL="https://${DOMAIN}"
     [[ $SSL_FAILED -eq 1 ]] && PANEL_URL="http://${DOMAIN}"
     echo ""
     echo -e "${BOLD}${GREEN}════════════════════════════════════════${NC}"
     echo -e "${BOLD}${GREEN}  ✓ Установка завершена!${NC}"
-    [[ $SSL_FAILED -eq 1 ]] && echo -e "${BOLD}${YELLOW}  ⚠  SSL не настроен — настройте вручную${NC}"
+    [[ $SSL_FAILED -eq 1 ]] && echo -e "${BOLD}${YELLOW}  ⚠  SSL не настроен - настройте вручную${NC}"
     echo -e "${BOLD}${GREEN}════════════════════════════════════════${NC}"
     echo ""
     echo -e "  🌐  Панель: ${CYAN}${PANEL_URL}${NC}   логин ${GREEN}admin${NC}"
@@ -573,8 +637,8 @@ else
 fi
 
 # Функции-обёртки для ssh и scp
-# run_ssh      — короткие команды (проверка соединения, OS), таймаут 25 сек
-# run_ssh_long — долгие команды (установка), без таймаута; ServerAlive держит сессию
+# run_ssh      - короткие команды (проверка соединения, OS), таймаут 25 сек
+# run_ssh_long - долгие команды (установка), без таймаута; ServerAlive держит сессию
 _timeout_cmd() {
     if command -v timeout &>/dev/null; then
         timeout "$@"
@@ -604,7 +668,7 @@ run_ssh() {
     fi
 }
 run_ssh_long() {
-    # Без внешнего таймаута — установка может идти 20–40 минут
+    # Без внешнего таймаута - установка может идти 20–40 минут
     if [[ "$AUTH_METHOD" == "password" ]]; then
         SSHPASS="$SSH_PASS" sshpass -e ssh "${SSH_LONG_OPTS[@]}" "${SSH_USER}@${SERVER_IP}" "$@"
     else
@@ -621,7 +685,7 @@ run_scp() {
 
 # Проверка соединения
 info "Проверяем подключение к ${SERVER_IP}:${SSH_PORT}..."
-set +e   # временно отключаем выход при ошибке — нам нужно поймать код возврата
+set +e   # временно отключаем выход при ошибке - нужно поймать код возврата
 SSH_TEST_OUTPUT=$(run_ssh "echo ok" 2>&1)
 SSH_TEST_RC=$?
 set -e
@@ -707,12 +771,12 @@ echo ""
 read -rp "  Всё верно? Начать установку? (y/N): " CONFIRM
 [[ "$CONFIRM" =~ ^[Yy]$ ]] || { info "Отменено."; exit 0; }
 
-# Все интерактивные вопросы позади — теперь включаем лог
+# Все интерактивные вопросы позади - теперь включаем лог
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 # ── Подготовка файлов ──────────────────────────────────────────────────────────
 step "Шаг 3/5: Подготовка"
-SECRET_KEY=$(gen_secret); DB_PASSWORD=$(gen_password)
+SECRET_KEY=$(gen_secret); DB_PASSWORD=$(gen_password); BOT_API_TOKEN=$(gen_secret)
 ok "Секреты сгенерированы"
 
 # Создаём .env локально
@@ -727,6 +791,7 @@ ENV_FILE=$(mktemp /tmp/kaza_env_XXXXXX)
     printf 'ADMIN_PASSWORD=%s\n'  "$ADMIN_PASSWORD"
     printf 'ADMIN_TG_ID=%s\n'     "$ADMIN_TG_ID"
     printf 'BOT_TOKEN=%s\n'       "$BOT_TOKEN"
+    printf 'BOT_API_TOKEN=%s\n'   "$BOT_API_TOKEN"
     printf 'DOMAIN=%s\n'          "$DOMAIN"
     if [[ $USE_SSL -eq 1 ]]; then
         printf 'CORS_ORIGINS=https://%s\n' "$DOMAIN"
@@ -737,13 +802,17 @@ ENV_FILE=$(mktemp /tmp/kaza_env_XXXXXX)
     printf 'ALERT_CHAT_ID=%s\n'   "$ADMIN_TG_ID"
     echo "REDIS_URL=redis://redis:6379/0"
     echo "BACKUP_KEEP_DAYS=14"; echo "LOG_LEVEL=INFO"
+    echo "UPDATE_CHANNEL=git"
+    echo "UPDATE_BRANCH=main"
+    echo "UPDATE_ARCHIVE_URL="
 } > "$ENV_FILE"
 ok ".env подготовлен"
 
 # Создаём архив проекта
 ARCHIVE_DIR_NAME="$(basename "$SCRIPT_DIR")"
-TEMP_ARCHIVE=$(mktemp /tmp/kaza_deploy_XXXXXX.tar.gz)
-tar -czf "$TEMP_ARCHIVE" \
+TEMP_DIR=$(mktemp -d)
+TEMP_ARCHIVE="${TEMP_DIR}/kaza_deploy.tar.gz"
+COPYFILE_DISABLE=1 tar --exclude='._*' --exclude='.DS_Store' -czf "$TEMP_ARCHIVE" \
     --exclude='.env' --exclude='.env.example' --exclude='media' --exclude='data' \
     --exclude='logs' --exclude='backups' --exclude='*.pyc' \
     --exclude='__pycache__' --exclude='.git' --exclude='node_modules' \
@@ -775,6 +844,7 @@ BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 ok()   { echo -e "${GREEN}✓${NC} $*"; }
 warn() { echo -e "${YELLOW}⚠${NC}  $*"; }
 info() { echo -e "${BLUE}→${NC} $*"; }
+err()  { echo -e "${RED}✗${NC} $*"; exit 1; }
 
 echo ""
 echo -e "${BOLD}═══ Kaza Shop: установка на сервере ═══${NC}"
@@ -832,12 +902,26 @@ tar -xzf /tmp/kaza_deploy.tar.gz -C /tmp/
 cp -r "/tmp/${ARCHIVE_DIR_NAME}/." "$INSTALL_DIR/"
 rm -rf "/tmp/${ARCHIVE_DIR_NAME}" /tmp/kaza_deploy.tar.gz
 mkdir -p "${INSTALL_DIR}/media" "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs" "${INSTALL_DIR}/backups"
-chown 1000:1000 "${INSTALL_DIR}/data" "${INSTALL_DIR}/media" "${INSTALL_DIR}/logs"
+chown -R 1000:1000 "${INSTALL_DIR}/data" "${INSTALL_DIR}/media" "${INSTALL_DIR}/logs"
+chmod 755 "${INSTALL_DIR}/data" "${INSTALL_DIR}/media" "${INSTALL_DIR}/logs"
 chmod 755 "${INSTALL_DIR}/backup.sh" "${INSTALL_DIR}/healthcheck.sh" \
-           "${INSTALL_DIR}/update.sh"  "${INSTALL_DIR}/restore.sh" 2>/dev/null || true
+           "${INSTALL_DIR}/update.sh"  "${INSTALL_DIR}/restore.sh" \
+           "${INSTALL_DIR}/deploy.sh" 2>/dev/null || true
 ok "Файлы установлены → $INSTALL_DIR"
 
-# .env
+# .env — сохраняем старый DB_PASSWORD если том PostgreSQL уже существует
+EXISTING_REMOTE_ENV="${INSTALL_DIR}/.env"
+REMOTE_VOLUME="kaza_shop_postgres_data"
+if [[ -f "$EXISTING_REMOTE_ENV" ]] && docker volume ls -q | grep -qx "$REMOTE_VOLUME"; then
+    OLD_DB_PASS_R=$(grep '^DB_PASSWORD=' "$EXISTING_REMOTE_ENV" | cut -d= -f2-)
+    OLD_SECRET_R=$(grep '^SECRET_KEY='   "$EXISTING_REMOTE_ENV" | cut -d= -f2-)
+    if [[ -n "$OLD_DB_PASS_R" && -n "$OLD_SECRET_R" ]]; then
+        # Заменяем в новом .env старые пароль и ключ
+        sed -i "s#^DB_PASSWORD=.*#DB_PASSWORD=${OLD_DB_PASS_R}#" /tmp/kaza_env
+        sed -i "s#^SECRET_KEY=.*#SECRET_KEY=${OLD_SECRET_R}#"    /tmp/kaza_env
+        ok "Существующий PostgreSQL-том найден — переиспользуем пароль БД"
+    fi
+fi
 cp /tmp/kaza_env "${INSTALL_DIR}/.env"
 chmod 600 "${INSTALL_DIR}/.env"
 rm -f /tmp/kaza_env
@@ -879,6 +963,33 @@ fi
 
 # Docker build + запуск
 cd "$INSTALL_DIR"
+info "Проверяем файлы миграций Alembic..."
+python3 - <<'PY'
+from pathlib import Path
+import sys
+
+base = Path("/opt/kaza_shop/alembic/versions")
+files = sorted(
+    p for p in base.glob("*.py")
+    if not p.name.startswith("._")
+)
+if not files:
+    print("ERROR: alembic/versions пуст")
+    sys.exit(1)
+
+for p in files:
+    b = p.read_bytes()
+    if b"\\x00" in b:
+        print(f"ERROR: null bytes detected in {p}")
+        sys.exit(1)
+    try:
+        compile(b.decode("utf-8"), str(p), "exec")
+    except Exception as e:
+        print(f"ERROR: invalid migration file {p}: {e}")
+        sys.exit(1)
+print("Alembic migrations: OK")
+PY
+ok "Миграции Alembic валидны"
 echo ""
 echo -e "${YELLOW}  ⏳ Скачиваем и собираем образы — это займёт 5–15 минут.${NC}"
 echo -e "${YELLOW}  Пожалуйста, не прерывайте процесс.${NC}"
@@ -908,7 +1019,10 @@ for i in $(seq 1 24); do
     echo -n "."
 done
 echo ""
-[[ $API_READY -eq 0 ]] && warn "API не ответил. Проверьте: docker compose -f docker-compose.prod.yml logs app"
+if [[ $API_READY -eq 0 ]]; then
+    warn "API не ответил в течение 2 минут. Установка продолжается."
+    warn "Проверьте позже: docker compose -f docker-compose.prod.yml logs app"
+fi
 
 # Проверка авторизации администратора
 if [[ $API_READY -eq 1 ]]; then
@@ -949,10 +1063,11 @@ ok "Автозапуск при перезагрузке настроен"
 
 # Cron
 (crontab -l 2>/dev/null | grep -v kaza_shop) > /tmp/ctab || true
-printf '0 2 * * *   bash %s/backup.sh     >> %s/logs/backup.log  2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/ctab
-printf '*/5 * * * * bash %s/healthcheck.sh >> %s/logs/monitor.log 2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/ctab
+printf '0 2 * * *   bash %s/backup.sh           >> %s/logs/backup.log        2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/ctab
+printf '0 * * * *   bash %s/backup.sh --hourly  >> %s/logs/backup_hourly.log 2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/ctab
+printf '*/5 * * * * bash %s/healthcheck.sh       >> %s/logs/monitor.log       2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/ctab
 crontab /tmp/ctab && rm -f /tmp/ctab
-ok "Cron: бэкап в 02:00, мониторинг каждые 5 мин"
+ok "Cron: ежедневный бэкап в 02:00 (в Telegram), почасовой локально, мониторинг каждые 5 мин"
 
 echo ""
 echo -e "${GREEN}═══ Установка на сервере завершена ═══${NC}"
@@ -975,7 +1090,8 @@ run_scp "$REMOTE_SCRIPT" "${SSH_USER}@${SERVER_IP}:/tmp/kaza_setup.sh"
 ok "Скрипт загружен"
 
 # Очистка временных файлов
-rm -f "$TEMP_ARCHIVE" "$ENV_FILE" "$REMOTE_SCRIPT"
+rm -f "$ENV_FILE" "$REMOTE_SCRIPT"
+rm -rf "$TEMP_DIR"
 
 # ── Запуск установки на сервере ────────────────────────────────────────────────
 step "Шаг 5/5: Установка на сервере"

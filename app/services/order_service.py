@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import uuid as uuid_mod
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -93,13 +94,26 @@ async def _send_document_telegram(chat_id, file_path: str, caption: str = "", re
 
 
 async def list_orders(
-    status: str | None, page: int, per_page: int, session: AsyncSession
+    status: str | None,
+    page: int,
+    per_page: int,
+    session: AsyncSession,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> OrderListResponse:
     base_q = select(Order)
     count_q = select(func.count()).select_from(Order)
     if status:
         base_q = base_q.where(Order.status == status)
         count_q = count_q.where(Order.status == status)
+    if date_from:
+        dt_from = datetime.fromisoformat(date_from)
+        base_q = base_q.where(Order.created_at >= dt_from)
+        count_q = count_q.where(Order.created_at >= dt_from)
+    if date_to:
+        dt_to = datetime.fromisoformat(date_to + "T23:59:59")
+        base_q = base_q.where(Order.created_at <= dt_to)
+        count_q = count_q.where(Order.created_at <= dt_to)
 
     total = (await session.execute(count_q)).scalar() or 0
     offset = (page - 1) * per_page

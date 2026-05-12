@@ -1,6 +1,6 @@
 """
 Сервис инвалидации кэша каталога в боте.
-Вынесен отдельно — используется из product_service, imports_service, catalog route.
+Вынесен отдельно - используется из product_service, imports_service, catalog route.
 """
 import asyncio
 import logging
@@ -9,7 +9,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Храним ссылку на активную задачу — без этого GC может её отменить до завершения
+# Храним ссылку на активную задачу - без этого GC может её отменить до завершения
 _invalidate_task: asyncio.Task | None = None
 
 

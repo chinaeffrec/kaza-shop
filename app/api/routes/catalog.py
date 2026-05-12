@@ -1,4 +1,4 @@
-"""Роуты каталога — публичные (для бота) + защищённый reload."""
+"""Роуты каталога - публичные (для бота) + защищённый reload."""
 from typing import List
 
 from fastapi import APIRouter, Depends

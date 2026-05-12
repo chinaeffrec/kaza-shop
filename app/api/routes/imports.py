@@ -1,4 +1,4 @@
-"""Роуты импорта — только HTTP-слой."""
+"""Роуты импорта - только HTTP-слой."""
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +18,6 @@ async def import_products(
     _: str = Depends(require_auth),
 ):
     if not file.filename or not file.filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(400, "Only .xlsx or .xls files are allowed")
+        raise HTTPException(400, "Only .xlsx files are allowed")
     content = await file.read()
     return await svc.import_products(content, session)

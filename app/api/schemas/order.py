@@ -42,12 +42,12 @@ class OrderStatusUpdate(BaseModel):
 
 
 class OrderCreateRequest(BaseModel):
-    user_id: int
-    comment: Optional[str] = None
-    delivery_address: Optional[str] = None
-    user_username: Optional[str] = None
-    user_first_name: Optional[str] = None
-    user_last_name: Optional[str] = None
+    user_id: int = Field(gt=0)
+    comment: Optional[str] = Field(default=None, max_length=2000)
+    delivery_address: Optional[str] = Field(default=None, max_length=1000)
+    user_username: Optional[str] = Field(default=None, max_length=64)
+    user_first_name: Optional[str] = Field(default=None, max_length=64)
+    user_last_name: Optional[str] = Field(default=None, max_length=64)
 
 
 class StatusItem(BaseModel):

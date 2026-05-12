@@ -13,9 +13,11 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.services.cache_service import invalidate_catalog_cache
 
 MEDIA_DIR = Path("/app/media")
+cfg = get_settings()
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +111,7 @@ async def import_db(content: bytes, session: AsyncSession) -> dict:
     try:
         # Одна транзакция: очистка + вставка
         # TRUNCATE RESTART IDENTITY CASCADE сбрасывает последовательности и
-        # удаляет связанные строки через CASCADE — безопасно при полном импорте
+        # удаляет связанные строки через CASCADE - безопасно при полном импорте
         await session.execute(text(
             "TRUNCATE "
             + ", ".join(_EXPORT_ORDER)
@@ -143,7 +145,7 @@ async def import_db(content: bytes, session: AsyncSession) -> dict:
         await session.commit()
         logger.info("DB import complete: %s", counts)
 
-        # Сбрасываем кэш каталога в боте — данные изменились
+        # Сбрасываем кэш каталога в боте - данные изменились
         await invalidate_catalog_cache()
 
         return {"ok": True, "counts": counts}
@@ -176,6 +178,10 @@ async def import_media(content: bytes) -> dict:
     Существующие файлы перезаписываются, лишние не удаляются.
     """
     try:
+        max_archive_bytes = cfg.media_import_max_archive_mb * 1024 * 1024
+        if len(content) > max_archive_bytes:
+            raise HTTPException(413, f"Архив слишком большой. Лимит: {cfg.media_import_max_archive_mb} MB")
+
         buf = io.BytesIO(content)
         if not zipfile.is_zipfile(buf):
             raise HTTPException(400, "Файл не является ZIP-архивом")
@@ -185,6 +191,18 @@ async def import_media(content: bytes) -> dict:
             names = zf.namelist()
             # Защита от path traversal: принимаем только плоские имена файлов
             safe_names = [n for n in names if "/" not in n and "\\" not in n and n]
+            if len(safe_names) > cfg.media_import_max_files:
+                raise HTTPException(413, f"Слишком много файлов. Лимит: {cfg.media_import_max_files}")
+            total_uncompressed = sum(
+                info.file_size for info in zf.infolist()
+                if info.filename in safe_names
+            )
+            max_uncompressed = cfg.media_import_max_uncompressed_mb * 1024 * 1024
+            if total_uncompressed > max_uncompressed:
+                raise HTTPException(
+                    413,
+                    f"Суммарный размер распаковки превышает лимит {cfg.media_import_max_uncompressed_mb} MB",
+                )
             for name in safe_names:
                 zf.extract(name, MEDIA_DIR)
         logger.info("Media import: extracted %d files", len(safe_names))

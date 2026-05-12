@@ -11,6 +11,7 @@ from aiogram.types import (
 )
 
 from app.bot.keyboards.catalog import categories_kb, subcategories_kb
+from app.bot.services.api_auth import bot_headers
 from app.bot.services.catalog_cache import catalog_cache
 
 logger = logging.getLogger(__name__)
@@ -278,7 +279,10 @@ class RenderEngine:
             user_id = message.chat.id
             try:
                 async with httpx.AsyncClient(timeout=10) as client:
-                    response = await client.get(f"http://app:8000/cart/{user_id}")
+                    response = await client.get(
+                        f"http://app:8000/cart/{user_id}",
+                        headers=bot_headers(user_id),
+                    )
                 data = response.json()
             except Exception as e:
                 logger.warning("Cart fetch failed for user %s: %s", user_id, e)

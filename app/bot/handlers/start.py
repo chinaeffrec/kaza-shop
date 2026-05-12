@@ -7,6 +7,7 @@ from aiogram.types import Message
 
 from app.bot.keyboards.menu import main_menu
 from app.bot.services.bot_messages import track
+from app.bot.services.api_auth import bot_headers
 
 router = Router()
 BASE_URL = "http://app:8000"
@@ -37,7 +38,7 @@ async def start_handler(message: Message):
                 "username": user.username,
                 "first_name": user.first_name,
                 "last_name": user.last_name,
-            })
+            }, headers=bot_headers(user.id))
     except Exception:
         pass
 

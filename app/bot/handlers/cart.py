@@ -2,6 +2,8 @@ import httpx
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 
+from app.bot.services.api_auth import bot_headers
+
 router = Router()
 BASE_URL = "http://app:8000"
 
@@ -16,6 +18,7 @@ async def add_to_cart(callback: CallbackQuery):
             resp = await client.post(
                 f"{BASE_URL}/cart/",
                 json={"user_id": user_id, "product_id": product_id, "quantity": 1},
+                headers=bot_headers(user_id),
             )
         if resp.status_code == 200:
             await callback.answer("✅ Добавлено в корзину")

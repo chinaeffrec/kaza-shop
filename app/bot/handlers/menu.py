@@ -12,6 +12,7 @@ from aiogram.types import (
 )
 
 from app.bot.keyboards.menu import main_menu
+from app.bot.services.api_auth import bot_headers
 from app.bot.services.bot_messages import clear_and_reset, track
 from app.bot.services.navigation import navigation
 from app.bot.services.render_engine import render_engine
@@ -54,9 +55,16 @@ def build_cart_keyboard(data: dict) -> InlineKeyboardMarkup:
     rows = []
     for item in data["items"]:
         pid = item["product_id"]
+        title = str(item.get("name", "Товар")).strip() or "Товар"
+        if len(title) > 48:
+            title = title[:45] + "..."
+        qty = int(item.get("quantity", 0))
+        rows.append([
+            InlineKeyboardButton(text=f"🧾 {title}", callback_data=f"noop_{pid}")
+        ])
         rows.append([
             InlineKeyboardButton(text="➖", callback_data=f"dec_{pid}"),
-            InlineKeyboardButton(text=item["name"], callback_data=f"noop_{pid}"),
+            InlineKeyboardButton(text=f"{qty} шт.", callback_data=f"noop_{pid}"),
             InlineKeyboardButton(text="➕", callback_data=f"inc_{pid}"),
             InlineKeyboardButton(text="🗑", callback_data=f"rm_{pid}"),
         ])
@@ -72,7 +80,7 @@ def _fmt_price(price: int | float) -> str:
 
 
 async def _get_public_settings() -> dict:
-    """Получить публичные настройки — не требует токена."""
+    """Получить публичные настройки - не требует токена."""
     try:
         async with httpx.AsyncClient(timeout=3) as client:
             r = await client.get(f"{BASE_URL}/settings/public")
@@ -98,7 +106,7 @@ async def open_cart(callback: CallbackQuery):
     user_id = callback.from_user.id
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            response = await client.get(f"{BASE_URL}/cart/{user_id}")
+            response = await client.get(f"{BASE_URL}/cart/{user_id}", headers=bot_headers(user_id))
         data = response.json()
     except Exception:
         await callback.answer("❌ Ошибка соединения с сервером", show_alert=True)
@@ -127,7 +135,7 @@ async def open_order_status(callback: CallbackQuery):
     user_id = callback.from_user.id
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            response = await client.get(f"{BASE_URL}/orders/user/{user_id}")
+            response = await client.get(f"{BASE_URL}/orders/user/{user_id}", headers=bot_headers(user_id))
         orders = response.json()
         if not isinstance(orders, list):
             orders = []
@@ -175,7 +183,7 @@ async def order_history(callback: CallbackQuery):
     user_id = callback.from_user.id
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            response = await client.get(f"{BASE_URL}/orders/user/{user_id}")
+            response = await client.get(f"{BASE_URL}/orders/user/{user_id}", headers=bot_headers(user_id))
         orders = response.json()
         if not isinstance(orders, list):
             orders = []
@@ -315,7 +323,7 @@ async def _finalize_order(message, state: FSMContext, address: str):
 
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            cart_resp = await client.get(f"{BASE_URL}/cart/{user_id}")
+            cart_resp = await client.get(f"{BASE_URL}/cart/{user_id}", headers=bot_headers(user_id))
         cart_data = cart_resp.json()
         total = cart_data.get("total", 0)
     except Exception:
@@ -332,7 +340,8 @@ async def _finalize_order(message, state: FSMContext, address: str):
                     "user_first_name": message.chat.first_name or "",
                     "user_last_name": message.chat.last_name or "",
                     "user_username": message.chat.username or "",
-                }
+                },
+                headers=bot_headers(user_id),
             )
     except Exception:
         await message.answer("❌ Ошибка соединения. Попробуйте ещё раз.", reply_markup=main_menu())

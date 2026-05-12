@@ -1,4 +1,4 @@
-"""Роуты настроек — только HTTP-слой."""
+"""Роуты настроек - только HTTP-слой."""
 import os
 import tempfile
 import zipfile
@@ -19,13 +19,13 @@ from app.services import settings_service_ext as svc
 from app.services import db_transfer_service as db_svc
 
 router = APIRouter(prefix="/settings", tags=["settings"])
-LOGS_DIR = Path("/app/logs")
+_LOG_DIRS = [Path("/app/logs"), Path("/app/data/logs"), Path("/tmp/kaza_logs")]
 
 
 @router.get("/public")
 async def get_public_settings(session: AsyncSession = Depends(get_session)):
     """
-    Публичный эндпоинт для бота — возвращает только безопасные поля:
+    Публичный эндпоинт для бота - возвращает только безопасные поля:
     welcome_message, shop_name, hide_out_of_stock.
     Не требует авторизации.
     """
@@ -155,11 +155,11 @@ async def media_import(
 
 @router.get("/logs/download")
 async def download_logs(_: str = Depends(require_auth)):
-    log_files = sorted(
-        [p for p in LOGS_DIR.glob("*.log*") if p.is_file()],
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    ) if LOGS_DIR.exists() else []
+    log_files = []
+    for logs_dir in _LOG_DIRS:
+        if logs_dir.exists():
+            log_files.extend(p for p in logs_dir.glob("*.log*") if p.is_file())
+    log_files = sorted(log_files, key=lambda p: p.stat().st_mtime, reverse=True)
     if not log_files:
         raise HTTPException(404, "Логи ещё не созданы")
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")

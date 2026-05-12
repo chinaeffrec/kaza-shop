@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.routes.auth import require_bot_auth
+from app.api.schemas.cart import CartAddRequest, CartItemAction
 from app.db.session import get_session
 from app.models.cart import Cart
 from app.models.product import Product
@@ -23,10 +25,16 @@ async def _inc_cart_stat(product_id: int, session: AsyncSession):
 
 
 @router.post("/", response_model=None)
-async def add_to_cart(data: dict, session: AsyncSession = Depends(get_session)):
-    user_id = data["user_id"]
-    product_id = data["product_id"]
-    quantity = data.get("quantity", 1)
+async def add_to_cart(
+    data: CartAddRequest,
+    session: AsyncSession = Depends(get_session),
+    bot_user_id: int | None = Depends(require_bot_auth),
+):
+    if bot_user_id is None or bot_user_id != data.user_id:
+        raise HTTPException(403, "user_id mismatch")
+    user_id = data.user_id
+    product_id = data.product_id
+    quantity = data.quantity
 
     result = await session.execute(
         select(Cart)
@@ -46,10 +54,17 @@ async def add_to_cart(data: dict, session: AsyncSession = Depends(get_session)):
 
 
 @router.get("/{user_id}")
-async def get_cart(user_id: int, session: AsyncSession = Depends(get_session)):
+async def get_cart(
+    user_id: int,
+    session: AsyncSession = Depends(get_session),
+    bot_user_id: int | None = Depends(require_bot_auth),
+):
+    if bot_user_id is None or bot_user_id != user_id:
+        raise HTTPException(403, "user_id mismatch")
     result = await session.execute(
         select(Cart, Product).join(Product, Cart.product_id == Product.id)
         .where(Cart.user_id == user_id)
+        .order_by(Cart.id.asc())
     )
     rows = result.all()
     items = []
@@ -65,10 +80,16 @@ async def get_cart(user_id: int, session: AsyncSession = Depends(get_session)):
 
 
 @router.post("/inc")
-async def inc_item(data: dict, session: AsyncSession = Depends(get_session)):
+async def inc_item(
+    data: CartItemAction,
+    session: AsyncSession = Depends(get_session),
+    bot_user_id: int | None = Depends(require_bot_auth),
+):
+    if bot_user_id is None or bot_user_id != data.user_id:
+        raise HTTPException(403, "user_id mismatch")
     result = await session.execute(
         select(Cart)
-        .where(Cart.user_id == data["user_id"], Cart.product_id == data["product_id"])
+        .where(Cart.user_id == data.user_id, Cart.product_id == data.product_id)
         .with_for_update()
     )
     item = result.scalar_one_or_none()
@@ -79,10 +100,16 @@ async def inc_item(data: dict, session: AsyncSession = Depends(get_session)):
 
 
 @router.post("/dec")
-async def dec_item(data: dict, session: AsyncSession = Depends(get_session)):
+async def dec_item(
+    data: CartItemAction,
+    session: AsyncSession = Depends(get_session),
+    bot_user_id: int | None = Depends(require_bot_auth),
+):
+    if bot_user_id is None or bot_user_id != data.user_id:
+        raise HTTPException(403, "user_id mismatch")
     result = await session.execute(
         select(Cart)
-        .where(Cart.user_id == data["user_id"], Cart.product_id == data["product_id"])
+        .where(Cart.user_id == data.user_id, Cart.product_id == data.product_id)
         .with_for_update()
     )
     item = result.scalar_one_or_none()
@@ -95,9 +122,15 @@ async def dec_item(data: dict, session: AsyncSession = Depends(get_session)):
 
 
 @router.post("/remove")
-async def remove_item(data: dict, session: AsyncSession = Depends(get_session)):
+async def remove_item(
+    data: CartItemAction,
+    session: AsyncSession = Depends(get_session),
+    bot_user_id: int | None = Depends(require_bot_auth),
+):
+    if bot_user_id is None or bot_user_id != data.user_id:
+        raise HTTPException(403, "user_id mismatch")
     result = await session.execute(
-        select(Cart).where(Cart.user_id == data["user_id"], Cart.product_id == data["product_id"])
+        select(Cart).where(Cart.user_id == data.user_id, Cart.product_id == data.product_id)
     )
     item = result.scalar_one_or_none()
     if item:

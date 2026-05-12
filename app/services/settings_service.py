@@ -2,9 +2,9 @@
 Сервис настроек магазина.
 
 Кэш намеренно убран: кэширование SQLAlchemy ORM-объектов между сессиями
-приводит к detached instance — объект не отслеживается текущей сессией,
+приводит к detached instance - объект не отслеживается текущей сессией,
 и изменения через setattr + session.commit() не сохраняются в БД.
-Таблица shop_settings содержит 1 строку — SELECT стоит микросекунды.
+Таблица shop_settings содержит 1 строку - SELECT стоит микросекунды.
 """
 import logging
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 async def get_shop_settings(session: AsyncSession) -> ShopSettings:
-    """Загружает настройки из БД в текущую сессию — объект гарантированно tracked."""
+    """Загружает настройки из БД в текущую сессию - объект гарантированно tracked."""
     res = await session.execute(select(ShopSettings).where(ShopSettings.id == 1))
     s = res.scalar_one_or_none()
     if not s:
@@ -29,5 +29,5 @@ async def get_shop_settings(session: AsyncSession) -> ShopSettings:
 
 
 def invalidate_settings_cache() -> None:
-    """Оставлен для совместимости вызовов — кэша больше нет."""
+    """Оставлен для совместимости вызовов - кэша больше нет."""
     pass

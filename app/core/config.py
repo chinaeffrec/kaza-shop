@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore",
-        # Отключаем авто-JSON-парсинг строк — разбираем сами через field_validator
+        # Отключаем авто-JSON-парсинг строк - разбираем сами через field_validator
         env_parse_none_str="null",
     )
 
@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     # Telegram
     bot_token: str = ""
     admin_tg_id: str = ""
+    bot_api_token: str = ""
 
     # Redis (FSM-хранилище для бота)
     redis_url: str = "redis://redis:6379/0"
@@ -42,7 +43,7 @@ class Settings(BaseSettings):
     alert_bot_token: str = ""
     alert_chat_id: str = ""
 
-    # Domain / CORS — хранится как строка, парсится в list через validator
+    # Domain / CORS - хранится как строка, парсится в list через validator
     domain: str = "localhost"
     cors_origins: Any = ""   # Any чтобы pydantic-settings не пытался сам парсить JSON
 
@@ -51,6 +52,11 @@ class Settings(BaseSettings):
 
     # Бэкапы
     backup_keep_days: int = 14
+
+    # Лимиты импорта медиа
+    media_import_max_archive_mb: int = 100
+    media_import_max_files: int = 2000
+    media_import_max_uncompressed_mb: int = 500
 
     # Logging
     log_level: str = "INFO"

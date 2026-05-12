@@ -45,7 +45,9 @@ async def get_dashboard(
         q = q.where(Order.created_at <= datetime.fromisoformat(date_to + "T23:59:59"))
 
     all_orders = (await session.execute(q)).scalars().all()
-    billable = [o for o in all_orders if o.status not in ("cancelled", "returned")]
+    # Выручка считается только по «активным» статусам; «новый», «отменён», «возврат» не учитываются
+    REVENUE_STATUSES = {"paid", "confirmed", "assembled", "shipped", "delivered"}
+    billable = [o for o in all_orders if o.status in REVENUE_STATUSES]
     total_revenue = sum(o.total for o in billable)
     avg_val = int(total_revenue / len(billable)) if billable else 0
 

@@ -23,7 +23,7 @@ from app.services.cache_service import invalidate_catalog_cache
 MEDIA_DIR = Path("/app/media")
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_IMAGE_SIZE = 10 * 1024 * 1024
-IMAGE_MAX_DIMENSION = 1000   # px — максимальная сторона после ресайза
+IMAGE_MAX_DIMENSION = 1000   # px - максимальная сторона после ресайза
 IMAGE_QUALITY = 85           # quality при сохранении
 
 
@@ -100,7 +100,7 @@ async def list_products(
     elif has_image is False:
         q = q.where(Product.image_file_id.is_(None))
 
-    # Общий счётчик — тот же фильтр, без offset/limit
+    # Общий счётчик - тот же фильтр, без offset/limit
     count_q = select(func.count()).select_from(q.subquery())
     total = (await session.execute(count_q)).scalar() or 0
 
@@ -236,7 +236,7 @@ async def upload_photo(
     if len(content) > MAX_IMAGE_SIZE:
         raise HTTPException(413, f"File too large. Max {MAX_IMAGE_SIZE // 1024 // 1024} MB.")
 
-    # Определяем расширение без запуска Pillow — он уйдёт в фон
+    # Определяем расширение без запуска Pillow - он уйдёт в фон
     ext = _FORMAT_MAP.get(file.content_type, ("JPEG", "jpg"))[1]
 
     product = await get_product_or_404(product_id, session)
@@ -252,14 +252,14 @@ async def upload_photo(
     dest = MEDIA_DIR / filename
     MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Сохраняем RAW-файл немедленно — клиент получит ответ без ожидания Pillow
+    # Сохраняем RAW-файл немедленно - клиент получит ответ без ожидания Pillow
     async with aiofiles.open(dest, "wb") as out:
         await out.write(content)
 
     setattr(product, field, filename)
     await session.commit()
 
-    # Pillow сжимает в фоне — уже после отправки HTTP-ответа клиенту
+    # Pillow сжимает в фоне - уже после отправки HTTP-ответа клиенту
     background_tasks.add_task(_compress_and_replace, dest, content, file.content_type)
     await invalidate_catalog_cache()
     return {"status": "ok", "slot": slot, "filename": filename, "url": f"/media/{filename}"}
