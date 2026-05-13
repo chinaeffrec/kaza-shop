@@ -295,12 +295,17 @@ if [[ "$DEPLOY_MODE" == "direct" ]]; then
     step "Шаг 2/9: Установка зависимостей"
     if ! command -v docker &>/dev/null; then
         info "Устанавливаем Docker..."
-        curl -fsSL https://get.docker.com | sh; systemctl enable --now docker
+        curl -fsSL https://get.docker.com | sh || {
+            warn "get.docker.com недоступен, пробуем apt..."
+            apt-get update && apt-get install -y docker.io docker-compose-plugin
+        }
+        systemctl enable --now docker
         ok "Docker установлен"
     else ok "Docker: $(docker --version)"; fi
-    docker compose version &>/dev/null 2>&1 || apt-get install -y -q docker-compose-plugin
+    docker compose version &>/dev/null 2>&1 || apt-get install -y docker-compose-plugin
     ok "Docker Compose готов"
     # Зеркала Docker Hub (на случай медленного или заблокированного доступа)
+    info "Настраиваем зеркала Docker Hub..."
     mkdir -p /etc/docker
     cat > /etc/docker/daemon.json << 'DOCKERCFG'
 {
@@ -316,8 +321,8 @@ DOCKERCFG
     ok "Зеркала Docker Hub настроены"
     if ! command -v nginx &>/dev/null; then
         info "Устанавливаем nginx и certbot..."
-        apt-get update -qq
-        apt-get install -y -q --no-install-recommends nginx certbot python3-certbot-nginx curl ufw
+        apt-get update
+        apt-get install -y --no-install-recommends nginx certbot python3-certbot-nginx curl ufw
         ok "Nginx и certbot установлены"
     else ok "Nginx: $(nginx -v 2>&1 | grep -o '[0-9.]*$' || echo ok)"; fi
     # Firewall
@@ -483,32 +488,6 @@ PY
         ok "Образы собраны"
         docker compose -f docker-compose.prod.yml up -d; ok "Сервисы запущены"
     fi
-    echo ""
-    info "Ожидаем готовности API (до 2 мин)..."
-    API_READY=0
-    for i in $(seq 1 24); do
-        sleep 5
-        if curl -sf "http://localhost:8000/health" &>/dev/null; then API_READY=1; ok "API отвечает"; break; fi
-        echo -n "."
-    done
-    echo ""
-    if [[ $API_READY -eq 0 ]]; then
-        err "API не ответил. Установка прервана. Проверьте: docker compose -f docker-compose.prod.yml logs app"
-    fi
-
-    if [[ $API_READY -eq 1 ]]; then
-        info "Проверяем авторизацию администратора..."
-        sleep 2
-        AUTH_TEST=$(curl -sf -X POST "http://localhost:8000/auth/login" \
-            -H "Content-Type: application/json" \
-            -d "{\"login\":\"admin\",\"password\":\"${ADMIN_PASSWORD}\"}" 2>/dev/null || echo '{}')
-        if echo "$AUTH_TEST" | grep -q '"token"'; then
-            ok "Администратор готов (логин: admin)"
-        else
-            warn "Не удалось проверить авторизацию. Войдите в панель с паролем, который вы задали."
-        fi
-    fi
-
     step "Шаг 9/9: Автоматизация"
     cat > /etc/systemd/system/kaza_shop.service << SYSTEMD_EOF
 [Unit]
@@ -539,6 +518,32 @@ SYSTEMD_EOF
     printf '*/5 * * * * bash %s/healthcheck.sh       >> %s/logs/monitor.log       2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/crontab_kaza
     crontab /tmp/crontab_kaza
     ok "Cron: ежедневный бэкап в 02:00 (в Telegram), почасовой локально, мониторинг каждые 5 мин"
+
+    echo ""
+    info "Ожидаем готовности API (до 2 мин)..."
+    API_READY=0
+    for i in $(seq 1 24); do
+        sleep 5
+        if curl -sf "http://localhost:8000/health" &>/dev/null; then API_READY=1; ok "API отвечает"; break; fi
+        echo -n "."
+    done
+    echo ""
+    if [[ $API_READY -eq 0 ]]; then
+        warn "API не ответил в течение 2 минут. Проверьте: docker compose -f docker-compose.prod.yml logs app"
+    fi
+
+    if [[ $API_READY -eq 1 ]]; then
+        info "Проверяем авторизацию администратора..."
+        sleep 2
+        AUTH_TEST=$(curl -sf -X POST "http://localhost:8000/auth/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"login\":\"admin\",\"password\":\"${ADMIN_PASSWORD}\"}" 2>/dev/null || echo '{}')
+        if echo "$AUTH_TEST" | grep -q '"token"'; then
+            ok "Администратор готов (логин: admin)"
+        else
+            warn "Не удалось проверить авторизацию. Войдите в панель с паролем, который вы задали."
+        fi
+    fi
 
     PANEL_URL="https://${DOMAIN}"
     [[ $SSL_FAILED -eq 1 ]] && PANEL_URL="http://${DOMAIN}"
@@ -859,14 +864,18 @@ ok "Ресурсы: RAM ${RAM_MB} MB, диск ${DISK_GB} GB"
 # Docker
 if ! command -v docker &>/dev/null; then
     info "Устанавливаем Docker..."
-    curl -fsSL https://get.docker.com | sh >/dev/null 2>&1
+    curl -fsSL https://get.docker.com | sh || {
+        warn "get.docker.com недоступен, пробуем apt..."
+        apt-get update && apt-get install -y docker.io docker-compose-plugin
+    }
     systemctl enable --now docker
     ok "Docker установлен"
 else ok "Docker: $(docker --version | cut -d' ' -f3 | tr -d ',')"; fi
-docker compose version &>/dev/null 2>&1 || apt-get install -y -q docker-compose-plugin
+docker compose version &>/dev/null 2>&1 || apt-get install -y docker-compose-plugin
 ok "Docker Compose готов"
 
 # Зеркала Docker Hub (резервные источники образов на случай медленного доступа)
+info "Настраиваем зеркала Docker Hub..."
 mkdir -p /etc/docker
 cat > /etc/docker/daemon.json << 'DOCKERCFG'
 {
@@ -882,8 +891,9 @@ systemctl restart docker
 ok "Зеркала Docker Hub настроены"
 
 # Nginx + certbot
-apt-get update -qq
-apt-get install -y -q --no-install-recommends nginx certbot python3-certbot-nginx curl unzip ufw
+info "Устанавливаем nginx и certbot..."
+apt-get update
+apt-get install -y --no-install-recommends nginx certbot python3-certbot-nginx curl unzip ufw
 ok "nginx и certbot готовы"
 
 # Firewall
@@ -939,7 +949,7 @@ SSL_FAILED=0
 if [[ "$USE_SSL" == "1" ]]; then
     info "Получаем SSL-сертификат..."
     if certbot certonly --nginx --non-interactive --agree-tos \
-       --email "$SSL_EMAIL" -d "$DOMAIN" >/dev/null 2>&1; then
+       --email "$SSL_EMAIL" -d "$DOMAIN"; then
         ok "SSL получен"
         cp "${INSTALL_DIR}/nginx/kaza_shop.conf" /etc/nginx/sites-available/kaza_shop
         sed -i "s/YOUR_DOMAIN/${DOMAIN}/g" /etc/nginx/sites-available/kaza_shop
@@ -1096,7 +1106,27 @@ rm -rf "$TEMP_DIR"
 # ── Запуск установки на сервере ────────────────────────────────────────────────
 step "Шаг 5/5: Установка на сервере"
 echo ""
-run_ssh_long "bash /tmp/kaza_setup.sh; rm -f /tmp/kaza_setup.sh"
+run_ssh_long "bash /tmp/kaza_setup.sh" || true
+run_ssh "rm -f /tmp/kaza_setup.sh" 2>/dev/null || true
+
+# Проверяем реальный результат — SSH может вернуть ненулевой код из-за разрыва
+# соединения во время долгой сборки, даже если установка прошла успешно
+info "Проверяем результат установки..."
+sleep 5
+INSTALL_OK=0
+if run_ssh "test -f /opt/kaza_shop/docker-compose.prod.yml" 2>/dev/null; then
+    RUNNING=$(run_ssh "docker compose -f /opt/kaza_shop/docker-compose.prod.yml ps --status running --quiet 2>/dev/null | wc -l" 2>/dev/null || echo "0")
+    [[ "$RUNNING" -ge 3 ]] && INSTALL_OK=1
+fi
+
+if [[ $INSTALL_OK -eq 0 ]]; then
+    echo ""
+    echo -e "${RED}✗ Установка не завершена — сервисы не запущены.${NC}"
+    echo -e "  Проверьте вывод выше и логи на сервере:"
+    echo -e "    ssh ${SSH_USER}@${SERVER_IP}"
+    echo -e "    docker compose -f /opt/kaza_shop/docker-compose.prod.yml logs --tail=50"
+    exit 1
+fi
 
 # ── Итог ──────────────────────────────────────────────────────────────────────
 echo ""
@@ -1108,8 +1138,8 @@ echo -e "  🌐  Панель: ${CYAN}${PANEL_URL}${NC}   логин ${GREEN}adm
 echo -e "  🤖  Бот:    ${CYAN}@${BOT_NAME}${NC}"
 echo ""
 echo -e "  ${BOLD}Управление (по SSH):${NC}"
-printf "  %-14s %s\n" "Статус:"  "cd /opt/kaza_shop && docker compose -f docker-compose.prod.yml ps"
-printf "  %-14s %s\n" "Логи:"    "cd /opt/kaza_shop && docker compose -f docker-compose.prod.yml logs -f"
+printf "  %-14s %s\n" "Статус:"   "cd /opt/kaza_shop && docker compose -f docker-compose.prod.yml ps"
+printf "  %-14s %s\n" "Логи:"     "cd /opt/kaza_shop && docker compose -f docker-compose.prod.yml logs -f"
 printf "  %-14s %s\n" "Обновить:" "bash /opt/kaza_shop/update.sh"
 printf "  %-14s %s\n" "Бэкап:"    "bash /opt/kaza_shop/backup.sh"
 echo ""
