@@ -1020,6 +1020,37 @@ else
     ok "Сервисы запущены"
 fi
 
+# Systemd и Cron — настраиваем сразу после запуска контейнеров,
+# до ожидания API, чтобы разрыв SSH-соединения не помешал
+cat > /etc/systemd/system/kaza_shop.service << __SYSTEMD__
+[Unit]
+Description=Kaza Shop Telegram Store
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/kaza_shop
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml down
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+__SYSTEMD__
+systemctl daemon-reload
+systemctl enable kaza_shop.service
+ok "Автозапуск при перезагрузке настроен"
+
+(crontab -l 2>/dev/null | grep -v kaza_shop) > /tmp/ctab || true
+printf '0 2 * * *   bash %s/backup.sh           >> %s/logs/backup.log        2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/ctab
+printf '0 * * * *   bash %s/backup.sh --hourly  >> %s/logs/backup_hourly.log 2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/ctab
+printf '*/5 * * * * bash %s/healthcheck.sh       >> %s/logs/monitor.log       2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/ctab
+crontab /tmp/ctab && rm -f /tmp/ctab
+ok "Cron: ежедневный бэкап в 02:00 (в Telegram), почасовой локально, мониторинг каждые 5 мин"
+
 # Ожидание API
 info "Ожидаем готовности API (до 2 мин)..."
 API_READY=0
@@ -1047,37 +1078,6 @@ if [[ $API_READY -eq 1 ]]; then
         warn "Не удалось проверить авторизацию. Войдите в панель с паролем, который вы задали."
     fi
 fi
-
-# Systemd
-cat > /etc/systemd/system/kaza_shop.service << __SYSTEMD__
-[Unit]
-Description=Kaza Shop Telegram Store
-Requires=docker.service
-After=docker.service network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-WorkingDirectory=/opt/kaza_shop
-ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml up -d
-ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml down
-TimeoutStartSec=120
-
-[Install]
-WantedBy=multi-user.target
-__SYSTEMD__
-systemctl daemon-reload
-systemctl enable kaza_shop.service
-ok "Автозапуск при перезагрузке настроен"
-
-# Cron
-(crontab -l 2>/dev/null | grep -v kaza_shop) > /tmp/ctab || true
-printf '0 2 * * *   bash %s/backup.sh           >> %s/logs/backup.log        2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/ctab
-printf '0 * * * *   bash %s/backup.sh --hourly  >> %s/logs/backup_hourly.log 2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/ctab
-printf '*/5 * * * * bash %s/healthcheck.sh       >> %s/logs/monitor.log       2>&1 # kaza_shop\n' "$INSTALL_DIR" "$INSTALL_DIR" >> /tmp/ctab
-crontab /tmp/ctab && rm -f /tmp/ctab
-ok "Cron: ежедневный бэкап в 02:00 (в Telegram), почасовой локально, мониторинг каждые 5 мин"
 
 echo ""
 echo -e "${GREEN}═══ Установка на сервере завершена ═══${NC}"
